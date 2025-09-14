@@ -17,12 +17,17 @@ app.use(fileUpload());
 
 const MONGO_URL = process.env.MONGO_URL;
 const WORD_TEMPLATE_URL = process.env.WORD_TEMPLATE_URL;
+// On ajoute la nouvelle variable pour le template du plan de leçon
+const LESSON_TEMPLATE_URL = process.env.LESSON_TEMPLATE_URL; 
 let geminiModel;
 
-// Cette section s'activera automatiquement quand vous aurez mis la variable sur Vercel
+if (!MONGO_URL) console.error('FATAL: MONGO_URL n\'est pas définie.');
 if (process.env.GEMINI_API_KEY) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+    // ================== CORRECTION ERREUR API ==================
+    // On retire le "-latest" qui cause l'erreur 404
+    geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); 
+    // =========================================================
     console.log('✅ SDK Google Gemini initialisé.');
 } else {
     console.warn('⚠️ GEMINI_API_KEY non défini. La fonctionnalité IA sera désactivée.');
@@ -54,6 +59,7 @@ function formatDateFrenchNode(date) { if (!date || isNaN(date.getTime())) return
 function getDateForDayNameNode(weekStartDate, dayName) { if (!weekStartDate || isNaN(weekStartDate.getTime())) return null; const dayOrder = { "Dimanche": 0, "Lundi": 1, "Mardi": 2, "Mercredi": 3, "Jeudi": 4 }; const offset = dayOrder[dayName]; if (offset === undefined) return null; const specificDate = new Date(Date.UTC(weekStartDate.getUTCFullYear(), weekStartDate.getUTCMonth(), weekStartDate.getUTCDate())); specificDate.setUTCDate(specificDate.getUTCDate() + offset); return specificDate; }
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
 
+// Les routes de base restent les mêmes
 app.post('/api/login', (req, res) => { const { username, password } = req.body; if (validUsers[username] && validUsers[username] === password) { res.status(200).json({ success: true, username: username }); } else { res.status(401).json({ success: false, message: 'Identifiants invalides' }); } });
 app.get('/api/plans/:week', async (req, res) => { const weekNumber = parseInt(req.params.week, 10); if (isNaN(weekNumber)) return res.status(400).json({ message: 'Semaine invalide.' }); try { const db = await connectToDatabase(); const planDocument = await db.collection('plans').findOne({ week: weekNumber }); if (planDocument) { res.status(200).json({ planData: planDocument.data || [], classNotes: planDocument.classNotes || {} }); } else { res.status(200).json({ planData: [], classNotes: {} }); } } catch (error) { console.error('Erreur MongoDB /plans/:week:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 app.post('/api/save-plan', async (req, res) => { const weekNumber = parseInt(req.body.week, 10); const data = req.body.data; if (isNaN(weekNumber) || !Array.isArray(data)) return res.status(400).json({ message: 'Données invalides.' }); try { const db = await connectToDatabase(); await db.collection('plans').updateOne({ week: weekNumber }, { $set: { data: data } }, { upsert: true }); res.status(200).json({ message: `Plan S${weekNumber} enregistré.` }); } catch (error) { console.error('Erreur MongoDB /save-plan:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
@@ -66,212 +72,156 @@ app.post('/api/generate-word', async (req, res) => {
         const { week, classe, data, notes } = req.body;
         const weekNumber = Number(week);
         if (!Number.isInteger(weekNumber) || !classe || !Array.isArray(data)) return res.status(400).json({ message: 'Données invalides.' });
-        
         let templateBuffer;
         try {
             const response = await fetch(WORD_TEMPLATE_URL);
             if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
             templateBuffer = Buffer.from(await response.arrayBuffer());
-        } catch (e) {
-            console.error("Erreur de fetch du template Word:", e);
-            return res.status(500).json({ message: `Erreur récup modèle Word.` });
-        }
-        
+        } catch (e) { return res.status(500).json({ message: `Erreur récup modèle Word.` }); }
         const zip = new PizZip(templateBuffer);
         const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
-        
         const groupedByDay = {};
         const dayOrder = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
         const datesNode = specificWeekDateRangesNode[weekNumber];
         let weekStartDateNode = null;
         if (datesNode?.start) weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
         if (!weekStartDateNode || isNaN(weekStartDateNode.getTime())) return res.status(500).json({ message: `Dates serveur manquantes pour S${weekNumber}.` });
-        
         const sampleRow = data[0] || {};
-        const jourKey = findKey(sampleRow, 'Jour'),
-              periodeKey = findKey(sampleRow, 'Période'),
-              matiereKey = findKey(sampleRow, 'Matière'),
-              leconKey = findKey(sampleRow, 'Leçon'),
-              travauxKey = findKey(sampleRow, 'Travaux de classe'),
-              supportKey = findKey(sampleRow, 'Support'),
-              devoirsKey = findKey(sampleRow, 'Devoirs');
-
-        data.forEach(item => {
-            const day = item[jourKey];
-            if (day && dayOrder.includes(day)) {
-                if (!groupedByDay[day]) groupedByDay[day] = [];
-                groupedByDay[day].push(item);
-            }
-        });
-
+        const jourKey = findKey(sampleRow, 'Jour'), periodeKey = findKey(sampleRow, 'Période'), matiereKey = findKey(sampleRow, 'Matière'), leconKey = findKey(sampleRow, 'Leçon'), travauxKey = findKey(sampleRow, 'Travaux de classe'), supportKey = findKey(sampleRow, 'Support'), devoirsKey = findKey(sampleRow, 'Devoirs');
+        data.forEach(item => { const day = item[jourKey]; if (day && dayOrder.includes(day)) { if (!groupedByDay[day]) groupedByDay[day] = []; groupedByDay[day].push(item); } });
         const joursData = dayOrder.map(dayName => {
             const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
             const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
-            
             if (groupedByDay[dayName] && groupedByDay[dayName].length > 0) {
                 const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
-                
-                const matieres = sortedEntries.map(item => ({
-                    matiere:         item[matiereKey] ?? "",
-                    lecon:           item[leconKey]   ?? "", 
-                    travaildeclasse: item[travauxKey] ?? "", 
-                    support:         item[supportKey] ?? "",
-                    devoirs:         item[devoirsKey] ?? ""
-                }));
-
+                const matieres = sortedEntries.map(item => ({ matiere: item[matiereKey] ?? "", lecon: item[leconKey] ?? "", travaildeclasse: item[travauxKey] ?? "", support: item[supportKey] ?? "", devoirs: item[devoirsKey] ?? "" }));
                 return { jourDateComplete: formattedDate, matieres: matieres };
-            } else {
-                return { jourDateComplete: formattedDate, matieres: [] };
-            }
+            } else { return { jourDateComplete: formattedDate, matieres: [] }; }
         });
-        
         let plageSemaineText = `Semaine ${weekNumber}`;
-        if (datesNode?.start && datesNode?.end) {
-            const startD = new Date(datesNode.start + 'T00:00:00Z'),
-                  endD = new Date(datesNode.end + 'T00:00:00Z');
-            if (!isNaN(startD.getTime()) && !isNaN(endD.getTime())) {
-                plageSemaineText = `du ${formatDateFrenchNode(startD)} au ${formatDateFrenchNode(endD)}`;
-            }
-        }
-        
-        const templateData = {
-            classe: classe,
-            semaine: weekNumber,
-            plageSemaine: plageSemaineText,
-            notes: notes || "",
-            jours: joursData
-        };
-        
+        if (datesNode?.start && datesNode?.end) { const startD = new Date(datesNode.start + 'T00:00:00Z'), endD = new Date(datesNode.end + 'T00:00:00Z'); if (!isNaN(startD.getTime()) && !isNaN(endD.getTime())) { plageSemaineText = `du ${formatDateFrenchNode(startD)} au ${formatDateFrenchNode(endD)}`; } }
+        const templateData = { classe: classe, semaine: weekNumber, plageSemaine: plageSemaineText, notes: notes || "", jours: joursData };
         doc.render(templateData);
-        
         const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
         const filename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`;
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
         res.send(buf);
-        
-    } catch (error) {
-        console.error('❌ Erreur serveur /generate-word:', error);
-        if (!res.headersSent) res.status(500).json({ message: 'Erreur interne /generate-word.' });
-    }
+    } catch (error) { console.error('❌ Erreur serveur /generate-word:', error); if (!res.headersSent) res.status(500).json({ message: 'Erreur interne /generate-word.' }); }
 });
 
 app.post('/api/generate-excel-workbook', async (req, res) => { try { const weekNumber = Number(req.body.week); if (!Number.isInteger(weekNumber)) return res.status(400).json({ message: 'Semaine invalide.' }); const db = await connectToDatabase(); const planDocument = await db.collection('plans').findOne({ week: weekNumber }); if (!planDocument?.data?.length) return res.status(404).json({ message: `Aucune donnée pour S${weekNumber}.` }); const finalHeaders = [ 'Enseignant', 'Jour', 'Période', 'Classe', 'Matière', 'Leçon', 'Travaux de classe', 'Support', 'Devoirs' ]; const formattedData = planDocument.data.map(item => { const row = {}; finalHeaders.forEach(header => { const itemKey = findKey(item, header); row[header] = itemKey ? item[itemKey] : ''; }); return row; }); const workbook = XLSX.utils.book_new(); const worksheet = XLSX.utils.json_to_sheet(formattedData, { header: finalHeaders }); worksheet['!cols'] = [ { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 20 }, { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 45 } ]; XLSX.utils.book_append_sheet(workbook, worksheet, `Plan S${weekNumber}`); const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }); const filename = `Plan_Hebdomadaire_S${weekNumber}_Complet.xlsx`; res.setHeader('Content-Disposition', `attachment; filename="${filename}"`); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buffer); } catch (error) { console.error('❌ Erreur serveur /generate-excel-workbook:', error); if (!res.headersSent) res.status(500).json({ message: 'Erreur interne Excel.' }); } });
 app.post('/api/full-report-by-class', async (req, res) => { try { const { classe: requestedClass } = req.body; if (!requestedClass) return res.status(400).json({ message: 'Classe requise.' }); const db = await connectToDatabase(); const allPlans = await db.collection('plans').find({}).sort({ week: 1 }).toArray(); if (!allPlans || allPlans.length === 0) return res.status(404).json({ message: 'Aucune donnée.' }); const dataBySubject = {}; const monthsFrench = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]; allPlans.forEach(plan => { const weekNumber = plan.week; let monthName = 'N/A'; const weekDates = specificWeekDateRangesNode[weekNumber]; if (weekDates?.start) { try { const startDate = new Date(weekDates.start + 'T00:00:00Z'); monthName = monthsFrench[startDate.getUTCMonth()]; } catch (e) {} } (plan.data || []).forEach(item => { const itemClassKey = findKey(item, 'classe'); const itemSubjectKey = findKey(item, 'matière'); if (itemClassKey && item[itemClassKey] === requestedClass && itemSubjectKey && item[itemSubjectKey]) { const subject = item[itemSubjectKey]; if (!dataBySubject[subject]) dataBySubject[subject] = []; const row = { 'Mois': monthName, 'Semaine': weekNumber, 'Période': item[findKey(item, 'période')] || '', 'Leçon': item[findKey(item, 'leçon')] || '', 'Travaux de classe': item[findKey(item, 'travaux de classe')] || '', 'Support': item[findKey(item, 'support')] || '', 'Devoirs': item[findKey(item, 'devoirs')] || '' }; dataBySubject[subject].push(row); } }); }); const subjectsFound = Object.keys(dataBySubject); if (subjectsFound.length === 0) return res.status(404).json({ message: `Aucune donnée pour la classe '${requestedClass}'.` }); const workbook = XLSX.utils.book_new(); const headers = ['Mois', 'Semaine', 'Période', 'Leçon', 'Travaux de classe', 'Support', 'Devoirs']; subjectsFound.sort().forEach(subject => { const safeSheetName = subject.substring(0, 30).replace(/[*?:/\\\[\]]/g, '_'); const worksheet = XLSX.utils.json_to_sheet(dataBySubject[subject], { header: headers }); worksheet['!cols'] = [ { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 40 }, { wch: 40 }, { wch: 25 }, { wch: 40 } ]; XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName); }); const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }); const filename = `Rapport_Complet_${requestedClass.replace(/[^a-z0-9]/gi, '_')}.xlsx`; res.setHeader('Content-Disposition', `attachment; filename="${filename}"`); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buffer); } catch (error) { console.error('❌ Erreur serveur /full-report-by-class:', error); if (!res.headersSent) res.status(500).json({ message: 'Erreur interne du rapport.' }); } });
 
+
+// ========================================================================
+// ============= MODIFICATION COMPLÈTE DE LA FONCTION IA ==================
+// ========================================================================
 app.post('/api/generate-ai-lesson-plan', async (req, res) => {
     try {
         if (!geminiModel) {
             return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API du serveur." });
         }
+        if (!LESSON_TEMPLATE_URL) {
+            return res.status(500).json({ message: "L'URL du modèle de plan de leçon n'est pas configurée sur le serveur (LESSON_TEMPLATE_URL)." });
+        }
+
         const { week, rowData } = req.body;
         if (!rowData || typeof rowData !== 'object' || !week) {
             return res.status(400).json({ message: "Les données de la ligne ou de la semaine sont manquantes." });
         }
-        const enseignant = rowData[findKey(rowData, 'Enseignant')] || 'N/A';
-        const classe = rowData[findKey(rowData, 'Classe')] || 'N/A';
-        const matiere = rowData[findKey(rowData, 'Matière')] || 'N/A';
+        
+        // Extraction des données de contexte
+        const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
+        const classe = rowData[findKey(rowData, 'Classe')] || '';
+        const matiere = rowData[findKey(rowData, 'Matière')] || '';
         const lecon = rowData[findKey(rowData, 'Leçon')] || 'Non spécifié';
-        const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
-        const support = rowData[findKey(rowData, 'Support')] || 'Non spécifié';
+        const jour = rowData[findKey(rowData, 'Jour')] || '';
+        const seance = rowData[findKey(rowData, 'Période')] || '';
+        const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || '';
 
-        const englishTeachers = ['Abeer', 'Salma', 'Amal', 'Hana'];
-        let prompt;
-
-        if (englishTeachers.includes(enseignant)) {
-            prompt = `
-            As an expert pedagogical assistant, generate a detailed lesson plan for a teacher.
-            The context is as follows:
-            - Subject: ${matiere}
-            - Class: ${classe}
-            - Lesson Topic: ${lecon}
-            - Planned Activity: ${travaux}
-            - Mentioned Teaching Support: ${support}
-            The lesson plan must be structured in English and very clearly, with the following sections. Each section must start with its exact title followed by "::".
-            Lesson Title:: [Propose a clear and engaging title for the lesson]
-            Learning Objectives:: [Bulleted list (-) of specific skills students will master by the end of the session. Use action verbs.]
-            Required Material:: [Bulleted list (-) of all necessary materials for the teacher and students.]
-            Lesson Procedure (Steps):: [Describe the procedure in detail, step by step, with an estimated duration for each phase (e.g., Introduction (5 min), Main Activity (25 min), Synthesis (10 min)). Be very concrete.]
-            Assessment Method:: [Propose a simple and effective method to assess whether the objectives have been met (e.g., oral questions, quick exercise, observation).]
-            Pedagogical Differentiation:: [Provide one suggestion for students with difficulties and one suggestion for more advanced students.]
-            Format your response exclusively in plain text. Do not use Markdown (no \`*\`, \`#\`, etc.). Use hyphens (-) for bulleted lists.
-            `;
-        } else {
-            prompt = `
-            En tant qu'assistant pédagogique expert, génère un plan de leçon détaillé pour un enseignant.
-            Le contexte est le suivant:
+        // Nouveau prompt pour générer du JSON correspondant au modèle Word
+        const prompt = `
+            En tant qu'assistant pédagogique expert pour une école internationale, crée un plan de leçon détaillé en te basant sur les informations suivantes.
+            Contexte:
             - Matière: ${matiere}
             - Classe: ${classe}
             - Thème de la leçon: ${lecon}
-            - Activité déjà prévue: ${travaux}
-            - Support pédagogique mentionné: ${support}
-            Le plan de leçon doit être structuré en français et de manière très claire, avec les sections suivantes. Chaque section doit commencer par son titre exact suivi de "::".
-            Titre de la Leçon:: [Propose un titre clair et engageant pour la leçon]
-            Objectifs d'Apprentissage:: [Liste à puces (-) des compétences précises que les élèves devront maîtriser à la fin de la séance. Utilise des verbes d'action.]
-            Matériel Requis:: [Liste à puces (-) de tout le matériel nécessaire pour l'enseignant et les élèves.]
-            Déroulement de la Séance (Étapes):: [Décris en détail le déroulement, étape par étape, avec une durée estimée pour chaque phase (ex: Introduction (5 min), Activité principale (25 min), Synthèse (10 min)). Sois très concret.]
-            Méthode d'Évaluation:: [Propose une méthode simple et efficace pour évaluer si les objectifs ont été atteints (ex: questions orales, exercice rapide, observation).]
-            Différenciation Pédagogique:: [Donne une suggestion pour les élèves en difficulté et une suggestion pour les élèves plus avancés.]
-            Formatte ta réponse exclusivement en texte brut. N'utilise pas de Markdown (pas de \`*\`, \`#\`, etc.). Utilise des tirets (-) pour les listes à puces.
-            `;
-        }
+
+            Génère une réponse au format JSON valide, sans aucun texte avant ou après. Le JSON doit avoir la structure suivante, avec des valeurs concrètes et professionnelles en français :
+            {
+              "TitreUnite": "un titre d'unité pertinent pour la leçon",
+              "Methodes": "liste des méthodes d'enseignement (ex: Exposé interactif, travail de groupe, etc.)",
+              "Outils": "liste des outils de travail (ex: Tableau blanc, projecteur, manuels, etc.)",
+              "Objectifs": "une liste concise des objectifs d'apprentissage sous forme de chaîne de caractères, séparés par des sauts de ligne (\\n). Commence chaque objectif par un tiret (-).",
+              "Deroulement": "une description du déroulement de la séance en plusieurs étapes (accueil, activité principale, conclusion), séparées par des sauts de ligne (\\n).",
+              "Contenu": "le contenu principal qui sera abordé pendant la leçon, détaillé en quelques points.",
+              "Ressources": "les ressources spécifiques à utiliser (ex: page 24 du manuel, vidéo youtube.com/..., etc.).",
+              "Devoirs": "une suggestion de devoirs, en prenant en compte si des devoirs sont déjà prévus : '${devoirsPrevus}'.",
+              "DiffLents": "une suggestion pour aider les apprenants en difficulté.",
+              "DiffTresPerf": "une suggestion pour stimuler les apprenants très performants.",
+              "DiffTous": "une suggestion de différenciation pour toute la classe."
+            }
+        `;
 
         const result = await geminiModel.generateContent(prompt);
         const response = await result.response;
-        const text = response.text();
-        const plan = {};
-        const lines = text.split('\n').filter(line => line.trim() !== '');
-        let currentSection = null;
-        lines.forEach(line => {
-            const match = line.match(/^(.*?)::/);
-            if (match && match[1]) {
-                currentSection = match[1].trim();
-                const content = line.substring(match[0].length).trim();
-                plan[currentSection] = content ? [content] : [];
-            } else if (currentSection && plan[currentSection]) {
-                plan[currentSection].push(line.trim());
-            }
-        });
-        const workbook = XLSX.utils.book_new();
-        const wsData = [
-            ["Plan de Leçon Généré par IA"], [], ["Contexte de la Leçon"],
-            ["Matière", matiere], ["Classe", classe], ["Leçon", lecon],
-            ["Travaux prévus", travaux], []
-        ];
-        const sectionOrder = [
-            "Titre de la Leçon", "Lesson Title", 
-            "Objectifs d'Apprentissage", "Learning Objectives",
-            "Matériel Requis", "Required Material",
-            "Déroulement de la Séance (Étapes)", "Lesson Procedure (Steps)", 
-            "Méthode d'Évaluation", "Assessment Method", 
-            "Différenciation Pédagogique", "Pedagogical Differentiation"
-        ];
-        sectionOrder.forEach(sectionTitle => {
-            if (plan[sectionTitle]) {
-                wsData.push([sectionTitle]);
-                plan[sectionTitle].forEach(item => { wsData.push(["", item]); });
-                wsData.push([]);
-            }
-        });
-        const worksheet = XLSX.utils.aoa_to_sheet(wsData);
-        worksheet['!cols'] = [{ wch: 30 }, { wch: 80 }];
-        worksheet['!merges'] = [
-            { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
-            { s: { r: 2, c: 0 }, e: { r: 2, c: 1 } }
-        ];
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Plan de Leçon IA");
-        const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
-        const filename = `Plan_IA_S${week}_${matiere.replace(/[^a-z0-9]/gi, '_')}.xlsx`;
+        let text = response.text();
+
+        // Nettoyage de la réponse JSON
+        text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        let aiData;
+        try {
+            aiData = JSON.parse(text);
+        } catch (e) {
+            console.error("Erreur de parsing JSON de la réponse de l'IA:", text);
+            return res.status(500).json({ message: "L'IA a retourné une réponse mal formée." });
+        }
+
+        // Récupération du modèle Word de plan de leçon
+        let templateBuffer;
+        try {
+            const response = await fetch(LESSON_TEMPLATE_URL);
+            if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
+            templateBuffer = Buffer.from(await response.arrayBuffer());
+        } catch (e) {
+            return res.status(500).json({ message: `Erreur récup modèle Word de plan de leçon.` });
+        }
+
+        const zip = new PizZip(templateBuffer);
+        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
+
+        // Préparation des données finales pour le template
+        const templateData = {
+            ...aiData, // Données générées par l'IA
+            Semaine: week,
+            Lecon: lecon,
+            Matiere: matiere,
+            Classe: classe,
+            Jour: jour,
+            Seance: seance,
+            NomEnseignant: enseignant,
+            Date: "" // Laissez vide ou calculez la date si nécessaire
+        };
+
+        doc.render(templateData);
+
+        const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+        const filename = `Plan_de_lecon_S${week}_${matiere.replace(/[^a-z0-9]/gi, '_')}.docx`;
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.send(buffer);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.send(buf);
+
     } catch (error) {
         console.error('❌ Erreur serveur /generate-ai-lesson-plan:', error);
         if (!res.headersSent) {
-            res.status(500).json({ message: `Erreur interne lors de la génération IA: ${error.message}` });
+            // Affiche une erreur plus détaillée si possible
+            const errorMessage = error.message || "Erreur interne.";
+            res.status(500).json({ message: `Erreur interne lors de la génération IA: ${errorMessage}` });
         }
     }
 });
+
 
 // Exporter l'app pour Vercel
 module.exports = app;
