@@ -29,7 +29,7 @@ if (process.env.GEMINI_API_KEY) {
 }
 
 const specificWeekDateRangesNode = {
-  1:{start:'2025-08-31',end:'2025-09-04'}, 2:{start:'2025-09-07',end:'2025-09-11'}, 3:{start:'2025-09-14',end:'2025-09-18'}, 4:{start:'2025-09-21',end:'2025-09-25'}, 5:{start:'2025-09-28',end:'2025-10-02'}, 6:{start:'2025-10-05',end:'2025-10-09'}, 7:{start:'2025-10-12',end:'2025-10-16'}, 8:{start:'2025-10-19',end:'2025-10-23'}, 9:{start:'2025-10-26',end:'2025-10-30'},10:{start:'2025-11-02',end:'2025-11-06'}, 11:{start:'2025-11-09',end:'2025-11-13'},12:{start:'2025-11-16',end:'2025-11-20'}, 13:{start:'2025-11-23',end:'2025-11-27'},14:{start:'2025-11-30',end:'2025-12-04'}, 15:{start:'2025-12-07',end:'2025-12-11'},16:{start:'2025-12-14',end:'2025-12-18'}, 17:{start:'2025-12-21',end:'2025-12-25'},18:{start:'2025-12-28',end:'2026-01-01'}, 19:{start:'2026-01-04',end:'2026-01-08'},20:{start:'2026-01-11',end:'2026-01-15'}, 21:{start:'2026-01-18',end:'2026-01-22'},22:{start:'2026-01-25',end:'2026-01-29'}, 23:{start:'2026-02-01',end:'2026-02-05'},24:{start:'2026-02-08',end:'2026-02-12'}, 25:{start:'2026-02-15',end:'2026-02-19'},26:{start:'2026-02-22',end:'2026-02-26'}, 27:{start:'2026-03-01',end:'2026-03-05'},28:{start:'2026-03-08',end:'2026-03-12'}, 29:{start:'2026-03-15',end:'2026-03-19'},30:{start:'2026-03-22',end:'2026-03-26'}, 31:{start:'2026-03-29',end:'2026-04-02'},32:{start:'2026-04-05',end:'2026-04-09'}, 33:{start:'2026-04-12',end:'2026-04-16'},34:{start:'2026-04-19',end:'2026-04-23'}, 35:{start:'2026-04-26',end:'2026-04-30'},36:{start:'2026-05-03',end:'2026-05-07'}, 37:{start:'2026-05-10',end:'2026-05-14'},38:{start:'2026-05-17',end:'2025-05-21'}, 39:{start:'2026-05-24',end:'2026-05-28'},40:{start:'2026-05-31',end:'2026-06-04'}, 41:{start:'2026-06-07',end:'2026-06-11'},42:{start:'2026-06-14',end:'2026-06-18'}, 43:{start:'2026-06-21',end:'2026-06-25'},44:{start:'2026-06-28',end:'2026-07-02'}, 45:{start:'2026-07-05',end:'2026-07-09'},46:{start:'2026-07-12',end:'2026-07-16'}, 47:{start:'2026-07-19',end:'2026-07-23'},48:{start:'2026-07-26',end:'2026-07-30'}
+  1:{start:'2025-08-31',end:'2025-09-04'}, 2:{start:'2025-09-07',end:'2025-09-11'}, 3:{start:'2025-09-14',end:'2025-09-18'}, 4:{start:'2025-09-21',end:'2025-09-25'}, 5:{start:'2025-09-28',end:'2025-10-02'}, 6:{start:'2025-10-05',end:'2025-10-09'}, 7:{start:'2025-10-12',end:'2025-10-16'}, 8:{start:'2025-10-19',end:'2025-10-23'}, 9:{start:'2025-10-26',end:'2025-10-30'},10:{start:'2025-11-02',end:'2025-11-06'}, 11:{start:'2025-11-09',end:'2025-11-13'},12:{start:'2025-11-16',end:'2025-11-20'}, 13:{start:'2025-11-23',end:'2025-11-27'},14:{start:'2025-11-30',end:'2025-12-04'}, 15:{start:'2025-12-07',end:'2025-12-11'},16:{start:'2025-12-14',end:'2025-12-18'}, 17:{start:'2025-12-21',end:'2025-12-25'},18:{start:'2025-12-28',end:'2026-01-01'}, 19:{start:'2026-01-04',end:'2026-01-08'},20:{start:'2026-01-11',end:'2026-01-15'}, 21:{start:'2026-01-18',end:'2026-01-22'},22:{start:'2026-01-25',end:'2026-01-29'}, 23:{start:'2026-02-01',end:'2026-02-05'},24:{start:'2026-02-08',end:'2026-02-12'}, 25:{start:'2026-02-15',end:'2026-02-19'},26:{start:'2026-02-22',end:'2026-02-26'}, 27:{start:'2026-03-01',end:'2026-03-05'},28:{start:'2026-03-08',end:'2026-03-12'}, 29:{start:'2026-03-15',end:'2026-03-19'},30:{start:'2026-03-22',end:'2026-03-26'}, 31:{start:'2026-03-29',end:'2026-04-02'},32:{start:'2026-04-05',end:'2026-04-09'}, 33:{start:'2026-04-12',end:'2026-04-16'},34:{start:'2026-04-19',end:'2026-04-23'}, 35:{start:'2026-04-26',end:'2026-04-30'},36:{start:'2026-05-03',end:'2026-05-07'}, 37:{start:'2026-5-10',end:'2026-05-14'},38:{start:'2026-05-17',end:'2025-05-21'}, 39:{start:'2026-05-24',end:'2026-05-28'},40:{start:'2026-05-31',end:'2026-06-04'}, 41:{start:'2026-06-07',end:'2026-06-11'},42:{start:'2026-06-14',end:'2026-06-18'}, 43:{start:'2026-06-21',end:'2026-06-25'},44:{start:'2026-06-28',end:'2026-07-02'}, 45:{start:'2026-07-05',end:'2026-07-09'},46:{start:'2026-07-12',end:'2026-07-16'}, 47:{start:'2026-07-19',end:'2026-07-23'},48:{start:'2026-07-26',end:'2026-07-30'}
 };
 
 const validUsers = {
@@ -79,11 +79,7 @@ app.post('/api/generate-word', async (req, res) => {
         }
         
         const zip = new PizZip(templateBuffer);
-        const doc = new Docxtemplater(zip, {
-            paragraphLoop: true,
-            linebreaks: true,
-            nullGetter: () => "" // Très important pour ne pas avoir d'erreurs
-        });
+        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
         
         const groupedByDay = {};
         const dayOrder = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
@@ -93,7 +89,6 @@ app.post('/api/generate-word', async (req, res) => {
         if (!weekStartDateNode || isNaN(weekStartDateNode.getTime())) return res.status(500).json({ message: `Dates serveur manquantes pour S${weekNumber}.` });
         
         const sampleRow = data[0] || {};
-        // Utilisation de findKey pour être robuste aux variations de casse dans le fichier Excel
         const jourKey = findKey(sampleRow, 'Jour'),
               periodeKey = findKey(sampleRow, 'Période'),
               matiereKey = findKey(sampleRow, 'Matière'),
@@ -101,12 +96,6 @@ app.post('/api/generate-word', async (req, res) => {
               travauxKey = findKey(sampleRow, 'Travaux de classe'),
               supportKey = findKey(sampleRow, 'Support'),
               devoirsKey = findKey(sampleRow, 'Devoirs');
-
-        // S'assurer que les clés essentielles sont trouvées
-        if (!jourKey || !matiereKey) {
-            console.error("Clés de colonnes manquantes (Jour ou Matière).");
-            return res.status(400).json({ message: "Structure de données invalide: 'Jour' ou 'Matière' introuvable." });
-        }
 
         data.forEach(item => {
             const day = item[jourKey];
@@ -116,28 +105,36 @@ app.post('/api/generate-word', async (req, res) => {
             }
         });
 
+        // Logique Robuste : Toujours créer les 5 jours de la semaine.
         const joursData = dayOrder.map(dayName => {
-            if (!groupedByDay[dayName] || groupedByDay[dayName].length === 0) return null;
-            
             const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
             const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
-            
-            const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
-            
-            // On s'assure que les clés de l'objet correspondent EXACTEMENT aux balises du template Word
-            const matieres = sortedEntries.map(item => ({
-                matiere:         item[matiereKey] ?? "",
-                lecon:           item[leconKey]   ?? "", // clé en minuscule
-                travaildeclasse: item[travauxKey] ?? "", // clé en minuscule
-                support:         item[supportKey] ?? "", // clé en minuscule
-                devoirs:         item[devoirsKey] ?? ""
-            }));
-            
-            return {
-                jourDateComplete: formattedDate,
-                matieres: matieres
-            };
-        }).filter(Boolean); // Retire les jours vides (null)
+
+            // Vérifier s'il y a des cours programmés pour ce jour
+            if (groupedByDay[dayName] && groupedByDay[dayName].length > 0) {
+                const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
+                
+                const matieres = sortedEntries.map(item => ({
+                    matiere:         item[matiereKey] ?? "",
+                    lecon:           item[leconKey]   ?? "",
+                    travaildeclasse: item[travauxKey] ?? "",
+                    support:         item[supportKey] ?? "",
+                    devoirs:         item[devoirsKey] ?? ""
+                }));
+
+                return {
+                    jourDateComplete: formattedDate,
+                    matieres: matieres
+                };
+            } else {
+                // S'il n'y a pas de cours, créer quand même le jour avec une liste de matières vide.
+                // Le template affichera la ligne du jour, mais pas de lignes de matières.
+                return {
+                    jourDateComplete: formattedDate,
+                    matieres: [] 
+                };
+            }
+        });
         
         let plageSemaineText = `Semaine ${weekNumber}`;
         if (datesNode?.start && datesNode?.end) {
@@ -156,22 +153,7 @@ app.post('/api/generate-word', async (req, res) => {
             jours: joursData
         };
         
-        // Bloc de débogage pour voir les données envoyées au template
-        // console.log(JSON.stringify(templateData, null, 2));
-
-        try {
-            doc.render(templateData);
-        } catch (error) {
-            // Capter les erreurs de rendu (ex: balise mal fermée)
-            console.error("Erreur Docxtemplater .render() :", error);
-            // Propager une erreur plus détaillée au client
-            const simplifiedError = {
-                message: error.message,
-                name: error.name,
-                properties: error.properties,
-            };
-            return res.status(500).json({ message: "Erreur lors du rendu du document.", details: simplifiedError });
-        }
+        doc.render(templateData);
         
         const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
         const filename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`;
@@ -180,7 +162,7 @@ app.post('/api/generate-word', async (req, res) => {
         res.send(buf);
         
     } catch (error) {
-        console.error('❌ Erreur serveur globale /generate-word:', error);
+        console.error('❌ Erreur serveur /generate-word:', error);
         if (!res.headersSent) res.status(500).json({ message: 'Erreur interne /generate-word.' });
     }
 });
