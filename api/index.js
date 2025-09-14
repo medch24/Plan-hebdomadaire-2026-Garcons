@@ -62,8 +62,6 @@ app.post('/api/save-row', async (req, res) => { const weekNumber = parseInt(req.
 app.get('/api/all-classes', async (req, res) => { try { const db = await connectToDatabase(); const classes = await db.collection('plans').distinct('data.Classe', { 'data.Classe': { $ne: null, $ne: "" } }); res.status(200).json(classes.sort()); } catch (error) { console.error('Erreur MongoDB /api/all-classes:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 
 // =================== DÉBUT DE LA CORRECTION ===================
-// On restaure la logique initiale qui crée une structure de données imbriquée,
-// parfaitement adaptée au modèle Word avec les boucles {#jours} et {#matieres}.
 app.post('/api/generate-word', async (req, res) => {
     try {
         const { week, classe, data, notes } = req.body;
@@ -76,11 +74,16 @@ app.post('/api/generate-word', async (req, res) => {
             if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
             templateBuffer = Buffer.from(await response.arrayBuffer());
         } catch (e) {
+            console.error("Erreur de fetch du template Word:", e);
             return res.status(500).json({ message: `Erreur récup modèle Word.` });
         }
         
         const zip = new PizZip(templateBuffer);
-        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
+        const doc = new Docxtemplater(zip, {
+            paragraphLoop: true,
+            linebreaks: true,
+            nullGetter: () => "" // Très important pour ne pas avoir d'erreurs
+        });
         
         const groupedByDay = {};
         const dayOrder = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
@@ -90,6 +93,7 @@ app.post('/api/generate-word', async (req, res) => {
         if (!weekStartDateNode || isNaN(weekStartDateNode.getTime())) return res.status(500).json({ message: `Dates serveur manquantes pour S${weekNumber}.` });
         
         const sampleRow = data[0] || {};
+        // Utilisation de findKey pour être robuste aux variations de casse dans le fichier Excel
         const jourKey = findKey(sampleRow, 'Jour'),
               periodeKey = findKey(sampleRow, 'Période'),
               matiereKey = findKey(sampleRow, 'Matière'),
@@ -97,6 +101,12 @@ app.post('/api/generate-word', async (req, res) => {
               travauxKey = findKey(sampleRow, 'Travaux de classe'),
               supportKey = findKey(sampleRow, 'Support'),
               devoirsKey = findKey(sampleRow, 'Devoirs');
+
+        // S'assurer que les clés essentielles sont trouvées
+        if (!jourKey || !matiereKey) {
+            console.error("Clés de colonnes manquantes (Jour ou Matière).");
+            return res.status(400).json({ message: "Structure de données invalide: 'Jour' ou 'Matière' introuvable." });
+        }
 
         data.forEach(item => {
             const day = item[jourKey];
@@ -106,46 +116,62 @@ app.post('/api/generate-word', async (req, res) => {
             }
         });
 
-        // Cette logique crée un tableau "matieres" pour chaque jour, ce qui correspond au modèle.
         const joursData = dayOrder.map(dayName => {
-            if (!groupedByDay[dayName]) return null;
+            if (!groupedByDay[dayName] || groupedByDay[dayName].length === 0) return null;
+            
             const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
             const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
+            
             const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
             
+            // On s'assure que les clés de l'objet correspondent EXACTEMENT aux balises du template Word
             const matieres = sortedEntries.map(item => ({
-                matiere: item[matiereKey] ?? "",
-                Lecon: item[leconKey] ?? "",
-                travailDeClasse: item[travauxKey] ?? "",
-                Support: item[supportKey] ?? "",
-                devoirs: item[devoirsKey] ?? ""
+                matiere:         item[matiereKey] ?? "",
+                lecon:           item[leconKey]   ?? "", // clé en minuscule
+                travaildeclasse: item[travauxKey] ?? "", // clé en minuscule
+                support:         item[supportKey] ?? "", // clé en minuscule
+                devoirs:         item[devoirsKey] ?? ""
             }));
             
             return {
                 jourDateComplete: formattedDate,
                 matieres: matieres
             };
-        }).filter(Boolean);
+        }).filter(Boolean); // Retire les jours vides (null)
         
         let plageSemaineText = `Semaine ${weekNumber}`;
         if (datesNode?.start && datesNode?.end) {
             const startD = new Date(datesNode.start + 'T00:00:00Z'),
                   endD = new Date(datesNode.end + 'T00:00:00Z');
             if (!isNaN(startD.getTime()) && !isNaN(endD.getTime())) {
-                // Correction de la préposition pour être plus naturelle
                 plageSemaineText = `du ${formatDateFrenchNode(startD)} au ${formatDateFrenchNode(endD)}`;
             }
         }
         
         const templateData = {
-            semaine: weekNumber,
             classe: classe,
-            jours: joursData,
-            notes: (notes || ""),
-            plageSemaine: plageSemaineText
+            semaine: weekNumber,
+            plageSemaine: plageSemaineText,
+            notes: notes || "",
+            jours: joursData
         };
         
-        doc.render(templateData);
+        // Bloc de débogage pour voir les données envoyées au template
+        // console.log(JSON.stringify(templateData, null, 2));
+
+        try {
+            doc.render(templateData);
+        } catch (error) {
+            // Capter les erreurs de rendu (ex: balise mal fermée)
+            console.error("Erreur Docxtemplater .render() :", error);
+            // Propager une erreur plus détaillée au client
+            const simplifiedError = {
+                message: error.message,
+                name: error.name,
+                properties: error.properties,
+            };
+            return res.status(500).json({ message: "Erreur lors du rendu du document.", details: simplifiedError });
+        }
         
         const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
         const filename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`;
@@ -154,7 +180,7 @@ app.post('/api/generate-word', async (req, res) => {
         res.send(buf);
         
     } catch (error) {
-        console.error('❌ Erreur serveur /generate-word:', error);
+        console.error('❌ Erreur serveur globale /generate-word:', error);
         if (!res.headersSent) res.status(500).json({ message: 'Erreur interne /generate-word.' });
     }
 });
