@@ -69,21 +69,21 @@ app.get('/api/all-classes', async (req, res) => { try { const db = await connect
 // ========= DÉBUT DES MODIFICATIONS POUR LA GÉNÉRATION WORD =========
 // ========================================================================
 
-// FONCTION UTILITAIRE 1 : Détection de l'arabe
 const isArabic = (text) => {
     if (!text || typeof text !== 'string') return false;
     const arabicRegex = /[\u0600-\u06FF]/;
     return arabicRegex.test(text);
 };
 
-// FONCTION UTILITAIRE 2 : Échappement des caractères XML
 const escapeXml = (text) => {
     if (!text || typeof text !== 'string') return '';
-    return text.replace(/[<>&]/g, (char) => {
+    return text.replace(/[<>&'"]/g, (char) => {
         switch (char) {
             case '<': return '&lt;';
             case '>': return '&gt;';
             case '&': return '&amp;';
+            case "'": return '&apos;';
+            case '"': return '&quot;';
             default: return char;
         }
     });
@@ -105,8 +105,6 @@ app.post('/api/generate-word', async (req, res) => {
         }
         
         const zip = new PizZip(templateBuffer);
-        
-        // L'option linebreaks est supprimée car nous la gérons manuellement via XML
         const doc = new Docxtemplater(zip, { paragraphLoop: true, nullGetter: () => "" });
 
         const groupedByDay = {};
@@ -117,13 +115,7 @@ app.post('/api/generate-word', async (req, res) => {
         if (!weekStartDateNode || isNaN(weekStartDateNode.getTime())) return res.status(500).json({ message: `Dates serveur manquantes pour S${weekNumber}.` });
 
         const sampleRow = data[0] || {};
-        const jourKey = findKey(sampleRow, 'Jour'),
-            periodeKey = findKey(sampleRow, 'Période'),
-            matiereKey = findKey(sampleRow, 'Matière'),
-            leconKey = findKey(sampleRow, 'Leçon'),
-            travauxKey = findKey(sampleRow, 'Travaux de classe'),
-            supportKey = findKey(sampleRow, 'Support'),
-            devoirsKey = findKey(sampleRow, 'Devoirs');
+        const jourKey = findKey(sampleRow, 'Jour'), periodeKey = findKey(sampleRow, 'Période'), matiereKey = findKey(sampleRow, 'Matière'), leconKey = findKey(sampleRow, 'Leçon'), travauxKey = findKey(sampleRow, 'Travaux de classe'), supportKey = findKey(sampleRow, 'Support'), devoirsKey = findKey(sampleRow, 'Devoirs');
 
         data.forEach(item => {
             const day = item[jourKey];
@@ -137,12 +129,10 @@ app.post('/api/generate-word', async (req, res) => {
             const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
             const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
 
-            if (groupedByDay[dayName] && groupedByDay[dayName].length > 0) {
+            if (groupedByDay[dayName] && groupedByDay[dayName].length >  0) {
                 const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
                 
-                // === BLOC DE CODE MODIFIÉ ===
                 const matieres = sortedEntries.map(item => {
-                    // Champs à traiter pour la mise en forme XML
                     const fieldsToProcess = {
                         Lecon: item[leconKey] ?? "",
                         travailDeClasse: item[travauxKey] ?? "",
@@ -151,27 +141,36 @@ app.post('/api/generate-word', async (req, res) => {
                     };
 
                     const processedFields = {
-                        matiere: item[matiereKey] ?? "" // La matière reste en texte simple
+                        matiere: item[matiereKey] ?? ""
                     };
 
                     for (const key in fieldsToProcess) {
                         const rawText = fieldsToProcess[key];
-                        
-                        // 1. Échapper le texte et remplacer les sauts de ligne par <w:br/>
-                        const escapedTextWithBreaks = escapeXml(rawText).replace(/\n/g, '<w:br/>');
-                        
-                        // 2. Détecter la direction du texte (RTL pour l'arabe)
                         const isRTL = isArabic(rawText);
                         const directionXml = isRTL ? '<w:pPr><w:bidi/></w:pPr>' : '';
 
-                        // 3. Construire la chaîne XML finale pour ce champ
-                        // xml:space="preserve" est important pour conserver les espaces
-                        processedFields[key] = `<w:p>${directionXml}<w:r><w:t xml:space="preserve">${escapedTextWithBreaks}</w:t></w:r></w:p>`;
+                        // === BLOC DE LOGIQUE CORRIGÉ ===
+                        // On découpe le texte par les sauts de ligne
+                        const lines = rawText.split('\n');
+                        let contentXml = '';
+
+                        // On boucle sur chaque ligne pour construire la structure XML correcte
+                        lines.forEach((line, index) => {
+                            // On ajoute la ligne de texte dans son propre "run" (<w:r>) et "text" (<w:t>)
+                            contentXml += `<w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r>`;
+                            // Si ce n'est pas la dernière ligne, on ajoute un saut de ligne dans son propre "run"
+                            if (index < lines.length - 1) {
+                                contentXml += `<w:r><w:br/></w:r>`;
+                            }
+                        });
+                        // === FIN DU BLOC DE LOGIQUE CORRIGÉ ===
+
+                        // On assemble le paragraphe final avec la direction et le contenu
+                        processedFields[key] = `<w:p>${directionXml}${contentXml}</w:p>`;
                     }
                     
                     return processedFields;
                 });
-                // === FIN DU BLOC DE CODE MODIFIÉ ===
 
                 return { jourDateComplete: formattedDate, matieres: matieres };
             } else {
@@ -200,7 +199,6 @@ app.post('/api/generate-word', async (req, res) => {
         if (!res.headersSent) res.status(500).json({ message: 'Erreur interne /generate-word.' });
     }
 });
-
 // ========================================================================
 // ========= FIN DES MODIFICATIONS POUR LA GÉNÉRATION WORD ===========
 // ========================================================================
@@ -237,7 +235,6 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
 
         let prompt;
-        // Nouvelle structure JSON demandée à l'IA, incluant un tableau d'étapes
         const jsonStructure = `{
               "TitreUnite": "un titre d'unité pertinent pour la leçon",
               "Methodes": "liste des méthodes d'enseignement",
@@ -304,13 +301,10 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         const zip = new PizZip(templateBuffer);
         const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
 
-        // Traitement du tableau "etapes" pour l'adapter aux colonnes du Word
         let minutageString = "";
         let contenuString = "";
         if (aiData.etapes && Array.isArray(aiData.etapes)) {
-            // Crée une chaîne de caractères pour la colonne "Minutage"
             minutageString = aiData.etapes.map(e => e.duree || "").join('\n');
-            // Crée une chaîne de caractères pour la colonne "Contenu"
             contenuString = aiData.etapes.map(e => `▶ ${e.phase || ""}:\n${e.activite || ""}`).join('\n\n');
         }
 
@@ -324,7 +318,6 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             Seance: seance,
             NomEnseignant: enseignant,
             Date: "",
-            // On remplace les champs du template par nos chaînes de caractères formatées
             Deroulement: minutageString,
             Contenu: contenuString,
         };
