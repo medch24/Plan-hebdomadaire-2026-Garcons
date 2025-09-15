@@ -29,18 +29,15 @@ if (process.env.GEMINI_API_KEY) {
     console.warn('⚠️ GEMINI_API_KEY non défini. La fonctionnalité IA sera désactivée.');
 }
 
-// ====================================================================
-// Listes des enseignants pour la sélection de la langue
 const arabicTeachers = ['Majed', 'Jaber', 'Saeed'];
 const englishTeachers = ['Kamel'];
-// ====================================================================
 
 const specificWeekDateRangesNode = {
   1:{start:'2025-08-31',end:'2025-09-04'}, 2:{start:'2025-09-07',end:'2025-09-11'}, 3:{start:'2025-09-14',end:'2025-09-18'}, 4:{start:'2025-09-21',end:'2025-09-25'}, 5:{start:'2025-09-28',end:'2025-10-02'}, 6:{start:'2025-10-05',end:'2025-10-09'}, 7:{start:'2025-10-12',end:'2025-10-16'}, 8:{start:'2025-10-19',end:'2025-10-23'}, 9:{start:'2025-10-26',end:'2025-10-30'},10:{start:'2025-11-02',end:'2025-11-06'}, 11:{start:'2025-11-09',end:'2025-11-13'},12:{start:'2025-11-16',end:'2025-11-20'}, 13:{start:'2025-11-23',end:'2025-11-27'},14:{start:'2025-11-30',end:'2025-12-04'}, 15:{start:'2025-12-07',end:'2025-12-11'},16:{start:'2025-12-14',end:'2025-12-18'}, 17:{start:'2025-12-21',end:'2025-12-25'},18:{start:'2025-12-28',end:'2026-01-01'}, 19:{start:'2026-01-04',end:'2026-01-08'},20:{start:'2026-01-11',end:'2026-01-15'}, 21:{start:'2026-01-18',end:'2026-01-22'},22:{start:'2026-01-25',end:'2026-01-29'}, 23:{start:'2026-02-01',end:'2026-02-05'},24:{start:'2026-02-08',end:'2026-02-12'}, 25:{start:'2026-02-15',end:'2026-02-19'},26:{start:'2026-02-22',end:'2026-02-26'}, 27:{start:'2026-03-01',end:'2026-03-05'},28:{start:'2026-03-08',end:'2026-03-12'}, 29:{start:'2026-03-15',end:'2026-03-19'},30:{start:'2026-03-22',end:'2026-03-26'}, 31:{start:'2026-03-29',end:'2026-04-02'},32:{start:'2026-04-05',end:'2026-04-09'}, 33:{start:'2026-04-12',end:'2026-04-16'},34:{start:'2026-04-19',end:'2026-04-23'}, 35:{start:'2026-04-26',end:'2026-04-30'},36:{start:'2026-05-03',end:'2026-05-07'}, 37:{start:'2026-05-10',end:'2026-05-14'},38:{start:'2026-05-17',end:'2025-05-21'}, 39:{start:'2026-05-24',end:'2026-05-28'},40:{start:'2026-05-31',end:'2026-06-04'}, 41:{start:'2026-06-07',end:'2026-06-11'},42:{start:'2026-06-14',end:'2026-06-18'}, 43:{start:'2026-06-21',end:'2026-06-25'},44:{start:'2026-06-28',end:'2026-07-02'}, 45:{start:'2026-07-05',end:'2026-07-09'},46:{start:'2026-07-12',end:'2026-07-16'}, 47:{start:'2026-07-19',end:'2026-07-23'},48:{start:'2026-07-26',end:'2026-07-30'}
 };
 
 const validUsers = {
-    "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Kamel": "Kamel",
+     "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Kamel": "Kamel",
     "Majed": "Majed", "Mohamed Ali": "Mohamed Ali", "Morched": "Morched", "Saeed": "Saeed",
     "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga", "Youssef": "Youssef", "Zine": "Zine"
 };
@@ -59,7 +56,7 @@ function formatDateFrenchNode(date) { if (!date || isNaN(date.getTime())) return
 function getDateForDayNameNode(weekStartDate, dayName) { if (!weekStartDate || isNaN(weekStartDate.getTime())) return null; const dayOrder = { "Dimanche": 0, "Lundi": 1, "Mardi": 2, "Mercredi": 3, "Jeudi": 4 }; const offset = dayOrder[dayName]; if (offset === undefined) return null; const specificDate = new Date(Date.UTC(weekStartDate.getUTCFullYear(), weekStartDate.getUTCMonth(), weekStartDate.getUTCDate())); specificDate.setUTCDate(specificDate.getUTCDate() + offset); return specificDate; }
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
 
-// Les routes de base restent les mêmes...
+// Les routes de base ne changent pas...
 app.post('/api/login', (req, res) => { const { username, password } = req.body; if (validUsers[username] && validUsers[username] === password) { res.status(200).json({ success: true, username: username }); } else { res.status(401).json({ success: false, message: 'Identifiants invalides' }); } });
 app.get('/api/plans/:week', async (req, res) => { const weekNumber = parseInt(req.params.week, 10); if (isNaN(weekNumber)) return res.status(400).json({ message: 'Semaine invalide.' }); try { const db = await connectToDatabase(); const planDocument = await db.collection('plans').findOne({ week: weekNumber }); if (planDocument) { res.status(200).json({ planData: planDocument.data || [], classNotes: planDocument.classNotes || {} }); } else { res.status(200).json({ planData: [], classNotes: {} }); } } catch (error) { console.error('Erreur MongoDB /plans/:week:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 app.post('/api/save-plan', async (req, res) => { const weekNumber = parseInt(req.body.week, 10); const data = req.body.data; if (isNaN(weekNumber) || !Array.isArray(data)) return res.status(400).json({ message: 'Données invalides.' }); try { const db = await connectToDatabase(); await db.collection('plans').updateOne({ week: weekNumber }, { $set: { data: data } }, { upsert: true }); res.status(200).json({ message: `Plan S${weekNumber} enregistré.` }); } catch (error) { console.error('Erreur MongoDB /save-plan:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
@@ -71,7 +68,7 @@ app.post('/api/generate-excel-workbook', async (req, res) => { try { const weekN
 app.post('/api/full-report-by-class', async (req, res) => { try { const { classe: requestedClass } = req.body; if (!requestedClass) return res.status(400).json({ message: 'Classe requise.' }); const db = await connectToDatabase(); const allPlans = await db.collection('plans').find({}).sort({ week: 1 }).toArray(); if (!allPlans || allPlans.length === 0) return res.status(404).json({ message: 'Aucune donnée.' }); const dataBySubject = {}; const monthsFrench = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]; allPlans.forEach(plan => { const weekNumber = plan.week; let monthName = 'N/A'; const weekDates = specificWeekDateRangesNode[weekNumber]; if (weekDates?.start) { try { const startDate = new Date(weekDates.start + 'T00:00:00Z'); monthName = monthsFrench[startDate.getUTCMonth()]; } catch (e) {} } (plan.data || []).forEach(item => { const itemClassKey = findKey(item, 'classe'); const itemSubjectKey = findKey(item, 'matière'); if (itemClassKey && item[itemClassKey] === requestedClass && itemSubjectKey && item[itemSubjectKey]) { const subject = item[itemSubjectKey]; if (!dataBySubject[subject]) dataBySubject[subject] = []; const row = { 'Mois': monthName, 'Semaine': weekNumber, 'Période': item[findKey(item, 'période')] || '', 'Leçon': item[findKey(item, 'leçon')] || '', 'Travaux de classe': item[findKey(item, 'travaux de classe')] || '', 'Support': item[findKey(item, 'support')] || '', 'Devoirs': item[findKey(item, 'devoirs')] || '' }; dataBySubject[subject].push(row); } }); }); const subjectsFound = Object.keys(dataBySubject); if (subjectsFound.length === 0) return res.status(404).json({ message: `Aucune donnée pour la classe '${requestedClass}'.` }); const workbook = XLSX.utils.book_new(); const headers = ['Mois', 'Semaine', 'Période', 'Leçon', 'Travaux de classe', 'Support', 'Devoirs']; subjectsFound.sort().forEach(subject => { const safeSheetName = subject.substring(0, 30).replace(/[*?:/\\\[\]]/g, '_'); const worksheet = XLSX.utils.json_to_sheet(dataBySubject[subject], { header: headers }); worksheet['!cols'] = [ { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 40 }, { wch: 40 }, { wch: 25 }, { wch: 40 } ]; XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName); }); const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }); const filename = `Rapport_Complet_${requestedClass.replace(/[^a-z0-9]/gi, '_')}.xlsx`; res.setHeader('Content-Disposition', `attachment; filename="${filename}"`); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buffer); } catch (error) { console.error('❌ Erreur serveur /full-report-by-class:', error); if (!res.headersSent) res.status(500).json({ message: 'Erreur interne du rapport.' }); } });
 
 // ========================================================================
-// ========= FONCTION IA AMÉLIORÉE AVEC LANGUES ET CONTEXTE =============
+// ========= FONCTION IA MISE À JOUR AVEC PLANIFICATION DÉTAILLÉE =========
 // ========================================================================
 app.post('/api/generate-ai-lesson-plan', async (req, res) => {
     try {
@@ -87,7 +84,6 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             return res.status(400).json({ message: "Les données sont manquantes." });
         }
         
-        // Extraction de TOUTES les données de contexte
         const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
         const classe = rowData[findKey(rowData, 'Classe')] || '';
         const matiere = rowData[findKey(rowData, 'Matière')] || '';
@@ -99,13 +95,18 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
 
         let prompt;
+        // Nouvelle structure JSON demandée à l'IA, incluant un tableau d'étapes
         const jsonStructure = `{
               "TitreUnite": "un titre d'unité pertinent pour la leçon",
-              "Methodes": "liste des méthodes d'enseignement (ex: Exposé interactif, travail de groupe)",
-              "Outils": "liste des outils de travail (ex: Tableau blanc, projecteur, manuels)",
-              "Objectifs": "une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\n). Commence chaque objectif par un tiret (-).",
-              "Deroulement": "une description du déroulement de la séance en plusieurs étapes (accueil, activité principale, conclusion), séparées par des sauts de ligne (\\n).",
-              "Contenu": "le contenu principal qui sera abordé, détaillé en quelques points.",
+              "Methodes": "liste des méthodes d'enseignement",
+              "Outils": "liste des outils de travail",
+              "Objectifs": "une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\\\n). Commence chaque objectif par un tiret (-).",
+              "etapes": [
+                  { "phase": "Introduction", "duree": "5 min", "activite": "Description de l'activité d'introduction pour l'enseignant et les élèves." },
+                  { "phase": "Activité Principale", "duree": "25 min", "activite": "Description de l'activité principale, en intégrant les 'travaux de classe' et le 'support' si possible." },
+                  { "phase": "Synthèse", "duree": "10 min", "activite": "Description de l'activité de conclusion et de vérification des acquis." },
+                  { "phase": "Clôture", "duree": "5 min", "activite": "Résumé rapide et annonce des devoirs." }
+              ],
               "Ressources": "les ressources spécifiques à utiliser.",
               "Devoirs": "une suggestion de devoirs.",
               "DiffLents": "une suggestion pour aider les apprenants en difficulté.",
@@ -113,55 +114,27 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
               "DiffTous": "une suggestion de différenciation pour toute la classe."
             }`;
             
-        // Logique de sélection de la langue
         if (englishTeachers.includes(enseignant)) {
-            prompt = `
-            As an expert pedagogical assistant for an international school, create a detailed lesson plan in English.
-            Context:
-            - Subject: ${matiere}
-            - Class: ${classe}
-            - Lesson Topic: ${lecon}
-            - Teacher's existing notes for this lesson:
-              - Planned Classwork: ${travaux}
-              - Mentioned Support/Materials: ${support}
-              - Planned Homework: ${devoirsPrevus}
-            
-            Integrate the teacher's existing notes intelligently into your suggestions.
-            Generate a response in valid JSON format only, with no other text before or after. The JSON structure must be as follows, with professional and concrete values in English:
-            ${jsonStructure}
-            `;
+            prompt = `As an expert pedagogical assistant, create a detailed 45-minute lesson plan in English. Structure the lesson into timed phases. Intelligently integrate the teacher's existing notes:
+            - Subject: ${matiere}, Class: ${classe}, Lesson Topic: ${lecon}
+            - Planned Classwork: ${travaux}
+            - Mentioned Support/Materials: ${support}
+            - Planned Homework: ${devoirsPrevus}
+            Generate a response in valid JSON format only. The JSON structure must be as follows, with professional and concrete values in English: ${jsonStructure}`;
         } else if (arabicTeachers.includes(enseignant)) {
-            prompt = `
-            بصفتك مساعدًا تربويًا خبيرًا لمدرسة دولية، قم بإنشاء خطة درس مفصلة باللغة العربية.
-            السياق:
-            - المادة: ${matiere}
-            - الفصل: ${classe}
-            - موضوع الدرس: ${lecon}
-            - ملاحظات المعلم الحالية لهذا الدرس:
-              - عمل الفصل المخطط له: ${travaux}
-              - الدعم / المواد المذكورة: ${support}
-              - الواجبات المخطط لها: ${devoirsPrevus}
-            
-            يجب أن تدمج بذكاء ملاحظات المعلم الحالية في اقتراحاتك.
-            قم بإنشاء استجابة بتنسيق JSON صالح فقط، بدون أي نص قبله أو بعده. يجب أن تكون بنية JSON على النحو التالي، مع قيم مهنية وملموسة باللغة العربية. يجب أن تبقى المفاتيح باللغة الإنجليزية كما هي:
-            ${jsonStructure}
-            `;
-        } else { // Français par défaut
-            prompt = `
-            En tant qu'assistant pédagogique expert pour une école internationale, crée un plan de leçon détaillé en français.
-            Contexte:
-            - Matière: ${matiere}
-            - Classe: ${classe}
-            - Thème de la leçon: ${lecon}
-            - Notes existantes de l'enseignant pour ce cours :
-              - Travaux de classe prévus : ${travaux}
-              - Support/Matériel mentionné : ${support}
-              - Devoirs prévus : ${devoirsPrevus}
-            
-            Intègre de manière intelligente les notes existantes de l'enseignant dans tes suggestions.
-            Génère une réponse au format JSON valide uniquement, sans aucun texte avant ou après. La structure JSON doit être la suivante, avec des valeurs concrètes et professionnelles en français :
-            ${jsonStructure}
-            `;
+            prompt = `بصفتك مساعدًا تربويًا خبيرًا، قم بإنشاء خطة درس مفصلة باللغة العربية مدتها 45 دقيقة. قم ببناء الدرس في مراحل محددة بوقت. ادمج بذكاء ملاحظات المعلم الحالية:
+            - المادة: ${matiere}, الفصل: ${classe}, موضوع الدرس: ${lecon}
+            - عمل الفصل المخطط له: ${travaux}
+            - الدعم / المواد المذكورة: ${support}
+            - الواجبات المخطط لها: ${devoirsPrevus}
+            قم بإنشاء استجابة بتنسيق JSON صالح فقط. يجب أن تكون بنية JSON على النحو التالي، مع قيم مهنية وملموسة باللغة العربية، مع الحفاظ على المفاتيح باللغة الإنجليزية: ${jsonStructure}`;
+        } else {
+            prompt = `En tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure la leçon en phases chronométrées. Intègre de manière intelligente les notes existantes de l'enseignant :
+            - Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}
+            - Travaux de classe prévus : ${travaux}
+            - Support/Matériel mentionné : ${support}
+            - Devoirs prévus : ${devoirsPrevus}
+            Génère une réponse au format JSON valide uniquement. La structure JSON doit être la suivante, avec des valeurs concrètes et professionnelles en français : ${jsonStructure}`;
         }
 
         const result = await geminiModel.generateContent(prompt);
@@ -189,6 +162,16 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         const zip = new PizZip(templateBuffer);
         const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
 
+        // Traitement du tableau "etapes" pour l'adapter aux colonnes du Word
+        let minutageString = "";
+        let contenuString = "";
+        if (aiData.etapes && Array.isArray(aiData.etapes)) {
+            // Crée une chaîne de caractères pour la colonne "Minutage"
+            minutageString = aiData.etapes.map(e => e.duree || "").join('\n');
+            // Crée une chaîne de caractères pour la colonne "Contenu"
+            contenuString = aiData.etapes.map(e => `▶ ${e.phase || ""}:\n${e.activite || ""}`).join('\n\n');
+        }
+
         const templateData = {
             ...aiData,
             Semaine: week,
@@ -198,7 +181,10 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             Jour: jour,
             Seance: seance,
             NomEnseignant: enseignant,
-            Date: ""
+            Date: "",
+            // On remplace les champs du template par nos chaînes de caractères formatées
+            Deroulement: minutageString,
+            Contenu: contenuString,
         };
 
         doc.render(templateData);
@@ -219,4 +205,3 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
 });
 
 module.exports = app;
-
