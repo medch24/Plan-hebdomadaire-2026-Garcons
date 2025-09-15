@@ -31,8 +31,8 @@ if (process.env.GEMINI_API_KEY) {
 
 // ====================================================================
 // Listes des enseignants pour la sélection de la langue
-const arabicTeachers = ['Amal Najar', 'Fatima', 'Ghadah', 'Raghd', 'Sara', 'Emen'];
-const englishTeachers = ['Abeer', 'Salma', 'Amal', 'Hana'];
+const arabicTeachers = ['Majed', 'Jaber', 'Saeed'];
+const englishTeachers = ['Kamel'];
 // ====================================================================
 
 const specificWeekDateRangesNode = {
@@ -40,11 +40,9 @@ const specificWeekDateRangesNode = {
 };
 
 const validUsers = {
-    "Mohamed": "Mohamed", "Zohra": "Zohra", "Abeer": "Abeer", "Aichetou": "Aichetou",
-    "Amal": "Amal", "Amal Najar": "Amal Najar", "Ange": "Ange", "Anouar": "Anouar",
-    "Emen": "Emen", "Farah": "Farah", "Fatima": "Fatima", "Ghadah": "Ghadah",
-    "Hana": "Hana", "Nada": "Nada", "Raghd": "Raghd", "Salma": "Salma",
-    "Sara": "Sara", "Souha": "Souha", "Inas": "Inas"
+    "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Kamel": "Kamel",
+    "Majed": "Majed", "Mohamed Ali": "Mohamed Ali", "Morched": "Morched", "Saeed": "Saeed",
+    "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga", "Youssef": "Youssef", "Zine": "Zine"
 };
 
 let cachedDb = null;
@@ -221,3 +219,4 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
 });
 
 module.exports = app;
+
