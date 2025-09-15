@@ -76,7 +76,7 @@ const isArabic = (text) => {
 };
 
 const escapeXml = (text) => {
-    if (!text || typeof text !== 'string') return '';
+    if (typeof text !== 'string') return '';
     return text.replace(/[<>&'"]/g, (char) => {
         switch (char) {
             case '<': return '&lt;';
@@ -129,7 +129,7 @@ app.post('/api/generate-word', async (req, res) => {
             const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
             const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
 
-            if (groupedByDay[dayName] && groupedByDay[dayName].length >  0) {
+            if (groupedByDay[dayName] && groupedByDay[dayName].length > 0) {
                 const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
                 
                 const matieres = sortedEntries.map(item => {
@@ -146,27 +146,26 @@ app.post('/api/generate-word', async (req, res) => {
 
                     for (const key in fieldsToProcess) {
                         const rawText = fieldsToProcess[key];
-                        const isRTL = isArabic(rawText);
-                        const directionXml = isRTL ? '<w:pPr><w:bidi/></w:pPr>' : '';
+                        
+                        // === CONDITION CORRIGÉE POUR GÉRER LES CHAMPS VIDES ===
+                        if (rawText && typeof rawText === 'string' && rawText.trim() !== '') {
+                            const isRTL = isArabic(rawText);
+                            const directionXml = isRTL ? '<w:pPr><w:bidi/></w:pPr>' : '';
+                            const lines = rawText.split('\n');
+                            let contentXml = '';
 
-                        // === BLOC DE LOGIQUE CORRIGÉ ===
-                        // On découpe le texte par les sauts de ligne
-                        const lines = rawText.split('\n');
-                        let contentXml = '';
-
-                        // On boucle sur chaque ligne pour construire la structure XML correcte
-                        lines.forEach((line, index) => {
-                            // On ajoute la ligne de texte dans son propre "run" (<w:r>) et "text" (<w:t>)
-                            contentXml += `<w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r>`;
-                            // Si ce n'est pas la dernière ligne, on ajoute un saut de ligne dans son propre "run"
-                            if (index < lines.length - 1) {
-                                contentXml += `<w:r><w:br/></w:r>`;
-                            }
-                        });
-                        // === FIN DU BLOC DE LOGIQUE CORRIGÉ ===
-
-                        // On assemble le paragraphe final avec la direction et le contenu
-                        processedFields[key] = `<w:p>${directionXml}${contentXml}</w:p>`;
+                            lines.forEach((line, index) => {
+                                contentXml += `<w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r>`;
+                                if (index < lines.length - 1) {
+                                    contentXml += `<w:r><w:br/></w:r>`;
+                                }
+                            });
+                            
+                            processedFields[key] = `<w:p>${directionXml}${contentXml}</w:p>`;
+                        } else {
+                            // Si le champ est vide, on assigne une chaîne vide pour éviter de créer une balise XML
+                            processedFields[key] = '';
+                        }
                     }
                     
                     return processedFields;
