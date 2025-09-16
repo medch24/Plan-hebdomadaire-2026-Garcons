@@ -55,12 +55,6 @@ async function connectToDatabase() {
 
 function formatDateFrenchNode(date) { if (!date || isNaN(date.getTime())) return "Date invalide"; const days = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]; const months = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]; const dayName = days[date.getUTCDay()]; const dayNum = String(date.getUTCDate()).padStart(2, '0'); const monthName = months[date.getUTCMonth()]; const yearNum = date.getUTCFullYear(); return `${dayName} ${dayNum} ${monthName} ${yearNum}`; }
 
-/**
- * NOUVELLE FONCTION AJOUTÉE
- * Formate une date au format "15 septembre 2025"
- * @param {Date} date L'objet Date à formater
- * @returns {string} La date formatée
- */
 function formatSimpleDateFrench(date) {
     if (!date || isNaN(date.getTime())) return "";
     const months = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
@@ -86,127 +80,88 @@ app.post('/api/full-report-by-class', async (req, res) => { try { const { classe
 
 
 // ========================================================================
-// ========= FONCTION IA ENTIÈREMENT MISE À JOUR ==========================
+// ========= FONCTION IA MISE À JOUR AVEC MEILLEURE GESTION D'ERREUR ======
 // ========================================================================
 app.post('/api/generate-ai-lesson-plan', async (req, res) => {
+    // Vérifications initiales
+    if (!geminiModel) return res.status(503).json({ message: "Service IA non initialisé. Vérifiez la clé API du serveur." });
+    if (!LESSON_TEMPLATE_URL) return res.status(500).json({ message: "URL du modèle de plan de leçon non configurée." });
+
+    const { week, rowData } = req.body;
+    if (!rowData || typeof rowData !== 'object' || !week) return res.status(400).json({ message: "Données de la ligne ou de la semaine manquantes." });
+
+    // Extraction des données avec valeurs par défaut
+    const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
+    const classe = rowData[findKey(rowData, 'Classe')] || '';
+    const matiere = rowData[findKey(rowData, 'Matière')] || '';
+    const lecon = rowData[findKey(rowData, 'Leçon')] || '';
+    const jour = rowData[findKey(rowData, 'Jour')] || '';
+    const seance = rowData[findKey(rowData, 'Période')] || '';
+    const support = rowData[findKey(rowData, 'Support')] || 'Non spécifié';
+    const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
+    const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
+    
+    // Début du bloc principal try...catch pour attraper toutes les erreurs
     try {
-        if (!geminiModel) {
-            return res.status(503).json({ message: "Le service IA n'est pas initialisé." });
-        }
-        if (!LESSON_TEMPLATE_URL) {
-            return res.status(500).json({ message: "L'URL du modèle de plan de leçon n'est pas configurée (LESSON_TEMPLATE_URL)." });
-        }
-
-        const { week, rowData } = req.body;
-        if (!rowData || typeof rowData !== 'object' || !week) {
-            return res.status(400).json({ message: "Les données sont manquantes." });
-        }
-        
-        const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
-        const classe = rowData[findKey(rowData, 'Classe')] || '';
-        const matiere = rowData[findKey(rowData, 'Matière')] || '';
-        const lecon = rowData[findKey(rowData, 'Leçon')] || '';
-        const jour = rowData[findKey(rowData, 'Jour')] || '';
-        const seance = rowData[findKey(rowData, 'Période')] || '';
-        const support = rowData[findKey(rowData, 'Support')] || 'Non spécifié';
-        const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
-        const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
-
+        const jsonStructure = `{ "TitreUnite": "...", "Methodes": "...", "Outils": "...", "Objectifs": "...", "etapes": [...], "Ressources": "...", "Devoirs": "...", "DiffLents": "...", "DiffTresPerf": "...", "DiffTous": "..." }`;
         let prompt;
-        const jsonStructure = `{
-              "TitreUnite": "un titre d'unité pertinent pour la leçon",
-              "Methodes": "liste des méthodes d'enseignement",
-              "Outils": "liste des outils de travail",
-              "Objectifs": "une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\\\n). Commence chaque objectif par un tiret (-).",
-              "etapes": [
-                  { "phase": "Introduction", "duree": "5 min", "activite": "Description de l'activité d'introduction pour l'enseignant et les élèves." },
-                  { "phase": "Activité Principale", "duree": "25 min", "activite": "Description de l'activité principale, en intégrant les 'travaux de classe' et le 'support' si possible." },
-                  { "phase": "Synthèse", "duree": "10 min", "activite": "Description de l'activité de conclusion et de vérification des acquis." },
-                  { "phase": "Clôture", "duree": "5 min", "activite": "Résumé rapide et annonce des devoirs." }
-              ],
-              "Ressources": "les ressources spécifiques à utiliser.",
-              "Devoirs": "une suggestion de devoirs.",
-              "DiffLents": "une suggestion pour aider les apprenants en difficulté.",
-              "DiffTresPerf": "une suggestion pour stimuler les apprenants très performants.",
-              "DiffTous": "une suggestion de différenciation pour toute la classe."
-            }`;
-            
         if (englishTeachers.includes(enseignant)) {
-            prompt = `As an expert pedagogical assistant, create a detailed 45-minute lesson plan in English. Structure the lesson into timed phases. Intelligently integrate the teacher's existing notes:
-            - Subject: ${matiere}, Class: ${classe}, Lesson Topic: ${lecon}
-            - Planned Classwork: ${travaux}
-            - Mentioned Support/Materials: ${support}
-            - Planned Homework: ${devoirsPrevus}
-            Generate a response in valid JSON format only. The JSON structure must be as follows, with professional and concrete values in English: ${jsonStructure}`;
+            prompt = `As an expert pedagogical assistant, create a detailed 45-minute lesson plan in English... Subject: ${matiere}, Class: ${classe}, Lesson Topic: ${lecon}... Generate a response in valid JSON format only: ${jsonStructure}`;
         } else if (arabicTeachers.includes(enseignant)) {
-            prompt = `بصفتك مساعدًا تربويًا خبيرًا، قم بإنشاء خطة درس مفصلة باللغة العربية مدتها 45 دقيقة. قم ببناء الدرس في مراحل محددة بوقت. ادمج بذكاء ملاحظات المعلم الحالية:
-            - المادة: ${matiere}, الفصل: ${classe}, موضوع الدرس: ${lecon}
-            - عمل الفصل المخطط له: ${travaux}
-            - الدعم / المواد المذكورة: ${support}
-            - الواجبات المخطط لها: ${devoirsPrevus}
-            قم بإنشاء استجابة بتنسيق JSON صالح فقط. يجب أن تكون بنية JSON على النحو التالي، مع قيم مهنية وملموسة باللغة العربية، مع الحفاظ على المفاتيح باللغة الإنجليزية: ${jsonStructure}`;
+            prompt = `بصفتك مساعدًا تربويًا خبيرًا... المادة: ${matiere}, الفصل: ${classe}, موضوع الدرس: ${lecon}... قم بإنشاء استجابة بتنسيق JSON صالح فقط: ${jsonStructure}`;
         } else {
-            prompt = `En tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure la leçon en phases chronométrées. Intègre de manière intelligente les notes existantes de l'enseignant :
-            - Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}
-            - Travaux de classe prévus : ${travaux}
-            - Support/Matériel mentionné : ${support}
-            - Devoirs prévus : ${devoirsPrevus}
-            Génère une réponse au format JSON valide uniquement. La structure JSON doit être la suivante, avec des valeurs concrètes et professionnelles en français : ${jsonStructure}`;
+            prompt = `En tant qu'assistant pédagogique expert... Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}... Génère une réponse au format JSON valide uniquement: ${jsonStructure}`;
         }
 
-        const result = await geminiModel.generateContent(prompt);
-        const response = await result.response;
-        let text = response.text();
-        
-        text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        // --- Étape 1: Appel à l'IA ---
+        let text;
+        try {
+            const result = await geminiModel.generateContent(prompt);
+            const response = await result.response;
+            text = response.text();
+        } catch (aiError) {
+            console.error('❌ Étape 1 - Erreur lors de l\'appel à l\'API Google Gemini:', aiError);
+            return res.status(500).json({ message: "Erreur de communication avec le service IA. Vérifiez la clé API, les quotas et les filtres de sécurité." });
+        }
+
+        // --- Étape 2: Analyse de la réponse JSON ---
         let aiData;
         try {
+            text = text.replace(/```json/g, "").replace(/```/g, "").trim();
             aiData = JSON.parse(text);
-        } catch (e) {
-            console.error("Erreur de parsing JSON de la réponse de l'IA:", text);
-            return res.status(500).json({ message: "L'IA a retourné une réponse mal formée." });
+        } catch (parseError) {
+            console.error('❌ Étape 2 - Erreur de parsing JSON de la réponse de l\'IA:', text);
+            return res.status(500).json({ message: "L'IA a retourné une réponse invalide (non-JSON)." });
         }
 
+        // --- Étape 3: Téléchargement du modèle Word ---
         let templateBuffer;
         try {
             const response = await fetch(LESSON_TEMPLATE_URL);
-            if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
+            if (!response.ok) throw new Error(`Le serveur a répondu avec le statut ${response.status}`);
             templateBuffer = Buffer.from(await response.arrayBuffer());
-        } catch (e) {
-            return res.status(500).json({ message: `Erreur récup modèle Word de plan de leçon.` });
+        } catch (fetchError) {
+            console.error('❌ Étape 3 - Erreur lors du téléchargement du modèle Word:', fetchError.message);
+            return res.status(500).json({ message: "Impossible de télécharger le modèle de document. Vérifiez l'URL." });
         }
 
+        // --- Étape 4: Génération du document Word ---
         const zip = new PizZip(templateBuffer);
         const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
 
-        let minutageString = "";
-        let contenuString = "";
-        if (aiData.etapes && Array.isArray(aiData.etapes)) {
-            minutageString = aiData.etapes.map(e => e.duree || "").join('\n');
-            contenuString = aiData.etapes.map(e => `▶ ${e.phase || ""}:\n${e.activite || ""}`).join('\n\n');
-        }
+        const minutageString = (aiData.etapes || []).map(e => e.duree || "").join('\n');
+        const contenuString = (aiData.etapes || []).map(e => `▶ ${e.phase || ""}:\n${e.activite || ""}`).join('\n\n');
 
         const templateData = {
-            ...aiData,
-            Semaine: week,
-            Lecon: lecon,
-            Matiere: matiere,
-            Classe: classe,
-            Jour: jour,
-            Seance: seance,
-            NomEnseignant: enseignant,
-            // MODIFICATION 1: La date est remplie avec la date actuelle formatée
-            Date: formatSimpleDateFrench(new Date()), 
-            Deroulement: minutageString,
-            Contenu: contenuString,
+            ...aiData, Semaine: week, Lecon: lecon, Matiere: matiere, Classe: classe, Jour: jour,
+            Seance: seance, NomEnseignant: enseignant, Date: formatSimpleDateFrench(new Date()),
+            Deroulement: minutageString, Contenu: contenuString,
         };
 
         doc.render(templateData);
-
         const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
         
-        // MODIFICATION 2: Le nom du fichier est créé selon le nouveau format demandé
-        const safeMatiere = matiere.replace(/[\\?%*:|"<>]/g, '-'); // Remplace les caractères invalides
+        const safeMatiere = matiere.replace(/[\\?%*:|"<>]/g, '-');
         const safeClasse = classe.replace(/[\\?%*:|"<>]/g, '-');
         const filename = `Plan de leçon-${safeMatiere}-${safeClasse}-S${week}-${seance}.docx`;
 
@@ -215,10 +170,10 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         res.send(buf);
 
     } catch (error) {
-        console.error('❌ Erreur serveur /generate-ai-lesson-plan:', error);
+        // Ce bloc attrape toutes les autres erreurs imprévues
+        console.error('❌ Erreur générale inattendue dans /generate-ai-lesson-plan:', error);
         if (!res.headersSent) {
-            const errorMessage = error.message || "Erreur interne.";
-            res.status(500).json({ message: `Erreur interne lors de la génération IA: ${errorMessage}` });
+            res.status(500).json({ message: "Une erreur inconnue est survenue sur le serveur." });
         }
     }
 });
