@@ -163,7 +163,7 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         
         const safeMatiere = matiere.replace(/[\\?%*:|"<>]/g, '-');
         const safeClasse = classe.replace(/[\\?%*:|"<>]/g, '-');
-        const filename = `Plan de leçon-${safeMatiere}-${safeClasse}-S${week}-${seance}.docx`;
+        const filename = `Plan de lecon-${safeMatiere}-${safeClasse}-S${week}-${seance}.docx`;
 
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
