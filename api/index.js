@@ -37,19 +37,10 @@ const specificWeekDateRangesNode = {
 };
 
 const validUsers = {
-    "Mohamed": "Mohamed",
-    "Abas": "Abas",
-    "Jaber": "Jaber",
-    "Kamel": "Kamel",
-    "Majed": "Majed",
-    "Mohamed Ali": "Mohamed Ali",
-    "Morched": "Morched",
-    "Saeed": "Saeed",
-    "Sami": "Sami",
-    "Sylvano": "Sylvano",
-    "Tonga": "Tonga",
-    "Youssef": "Youssef",
-    "Zine": "Zine"
+    "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Kamel": "Kamel",
+    "Majed": "Majed", "Mohamed Ali": "Mohamed Ali", "Morched": "Morched",
+    "Saeed": "Saeed", "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga",
+    "Youssef": "Youssef", "Zine": "Zine"
 };
 
 let cachedDb = null;
@@ -63,10 +54,20 @@ async function connectToDatabase() {
 }
 
 function formatDateFrenchNode(date) { if (!date || isNaN(date.getTime())) return "Date invalide"; const days = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]; const months = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]; const dayName = days[date.getUTCDay()]; const dayNum = String(date.getUTCDate()).padStart(2, '0'); const monthName = months[date.getUTCMonth()]; const yearNum = date.getUTCFullYear(); return `${dayName} ${dayNum} ${monthName} ${yearNum}`; }
+
+// NOUVELLE FONCTION pour un format de date simple : "15 septembre 2025"
+function formatSimpleDateFrench(date) {
+    if (!date || isNaN(date.getTime())) return "";
+    const months = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+    const dayNum = date.getDate();
+    const monthName = months[date.getMonth()];
+    const yearNum = date.getFullYear();
+    return `${dayNum} ${monthName} ${yearNum}`;
+}
+
 function getDateForDayNameNode(weekStartDate, dayName) { if (!weekStartDate || isNaN(weekStartDate.getTime())) return null; const dayOrder = { "Dimanche": 0, "Lundi": 1, "Mardi": 2, "Mercredi": 3, "Jeudi": 4 }; const offset = dayOrder[dayName]; if (offset === undefined) return null; const specificDate = new Date(Date.UTC(weekStartDate.getUTCFullYear(), weekStartDate.getUTCMonth(), weekStartDate.getUTCDate())); specificDate.setUTCDate(specificDate.getUTCDate() + offset); return specificDate; }
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
 
-// Les routes de base ne changent pas...
 app.post('/api/login', (req, res) => { const { username, password } = req.body; if (validUsers[username] && validUsers[username] === password) { res.status(200).json({ success: true, username: username }); } else { res.status(401).json({ success: false, message: 'Identifiants invalides' }); } });
 app.get('/api/plans/:week', async (req, res) => { const weekNumber = parseInt(req.params.week, 10); if (isNaN(weekNumber)) return res.status(400).json({ message: 'Semaine invalide.' }); try { const db = await connectToDatabase(); const planDocument = await db.collection('plans').findOne({ week: weekNumber }); if (planDocument) { res.status(200).json({ planData: planDocument.data || [], classNotes: planDocument.classNotes || {} }); } else { res.status(200).json({ planData: [], classNotes: {} }); } } catch (error) { console.error('Erreur MongoDB /plans/:week:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 app.post('/api/save-plan', async (req, res) => { const weekNumber = parseInt(req.body.week, 10); const data = req.body.data; if (isNaN(weekNumber) || !Array.isArray(data)) return res.status(400).json({ message: 'Données invalides.' }); try { const db = await connectToDatabase(); await db.collection('plans').updateOne({ week: weekNumber }, { $set: { data: data } }, { upsert: true }); res.status(200).json({ message: `Plan S${weekNumber} enregistré.` }); } catch (error) { console.error('Erreur MongoDB /save-plan:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
@@ -105,11 +106,8 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
 
         let prompt;
-        // Nouvelle structure JSON demandée à l'IA, incluant un tableau d'étapes
         const jsonStructure = `{
-              "TitreUnite": "un titre d'unité pertinent pour la leçon",
-              "Methodes": "liste des méthodes d'enseignement",
-              "Outils": "liste des outils de travail",
+              "TitreUnite": "un titre d'unité pertinent pour la leçon", "Methodes": "liste des méthodes d'enseignement", "Outils": "liste des outils de travail",
               "Objectifs": "une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\\\n). Commence chaque objectif par un tiret (-).",
               "etapes": [
                   { "phase": "Introduction", "duree": "5 min", "activite": "Description de l'activité d'introduction pour l'enseignant et les élèves." },
@@ -117,10 +115,8 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
                   { "phase": "Synthèse", "duree": "10 min", "activite": "Description de l'activité de conclusion et de vérification des acquis." },
                   { "phase": "Clôture", "duree": "5 min", "activite": "Résumé rapide et annonce des devoirs." }
               ],
-              "Ressources": "les ressources spécifiques à utiliser.",
-              "Devoirs": "une suggestion de devoirs.",
-              "DiffLents": "une suggestion pour aider les apprenants en difficulté.",
-              "DiffTresPerf": "une suggestion pour stimuler les apprenants très performants.",
+              "Ressources": "les ressources spécifiques à utiliser.", "Devoirs": "une suggestion de devoirs.",
+              "DiffLents": "une suggestion pour aider les apprenants en difficulté.", "DiffTresPerf": "une suggestion pour stimuler les apprenants très performants.",
               "DiffTous": "une suggestion de différenciation pour toute la classe."
             }`;
             
@@ -153,54 +149,38 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         
         text = text.replace(/```json/g, "").replace(/```/g, "").trim();
         let aiData;
-        try {
-            aiData = JSON.parse(text);
-        } catch (e) {
-            console.error("Erreur de parsing JSON de la réponse de l'IA:", text);
-            return res.status(500).json({ message: "L'IA a retourné une réponse mal formée." });
-        }
+        try { aiData = JSON.parse(text); } catch (e) { console.error("Erreur de parsing JSON de la réponse de l'IA:", text); return res.status(500).json({ message: "L'IA a retourné une réponse mal formée." }); }
 
         let templateBuffer;
-        try {
-            const response = await fetch(LESSON_TEMPLATE_URL);
-            if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
-            templateBuffer = Buffer.from(await response.arrayBuffer());
-        } catch (e) {
-            return res.status(500).json({ message: `Erreur récup modèle Word de plan de leçon.` });
-        }
+        try { const response = await fetch(LESSON_TEMPLATE_URL); if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`); templateBuffer = Buffer.from(await response.arrayBuffer()); } catch (e) { return res.status(500).json({ message: `Erreur récup modèle Word de plan de leçon.` }); }
 
         const zip = new PizZip(templateBuffer);
         const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
 
-        // Traitement du tableau "etapes" pour l'adapter aux colonnes du Word
-        let minutageString = "";
-        let contenuString = "";
+        let minutageString = ""; let contenuString = "";
         if (aiData.etapes && Array.isArray(aiData.etapes)) {
-            // Crée une chaîne de caractères pour la colonne "Minutage"
             minutageString = aiData.etapes.map(e => e.duree || "").join('\n');
-            // Crée une chaîne de caractères pour la colonne "Contenu"
             contenuString = aiData.etapes.map(e => `▶ ${e.phase || ""}:\n${e.activite || ""}`).join('\n\n');
         }
 
         const templateData = {
-            ...aiData,
-            Semaine: week,
-            Lecon: lecon,
-            Matiere: matiere,
-            Classe: classe,
-            Jour: jour,
-            Seance: seance,
-            NomEnseignant: enseignant,
-            Date: "",
-            // On remplace les champs du template par nos chaînes de caractères formatées
-            Deroulement: minutageString,
-            Contenu: contenuString,
+            ...aiData, Semaine: week, Lecon: lecon, Matiere: matiere, Classe: classe,
+            Jour: jour, Seance: seance, NomEnseignant: enseignant,
+            // MODIFICATION: Remplissage automatique de la date
+            Date: formatSimpleDateFrench(new Date()),
+            Deroulement: minutageString, Contenu: contenuString,
         };
 
         doc.render(templateData);
 
         const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
-        const filename = `Plan_de_lecon_S${week}_${matiere.replace(/[^a-z0-9]/gi, '_')}.docx`;
+        
+        // MODIFICATION: Nouveau format pour le nom du fichier
+        // Remplace les caractères invalides pour un nom de fichier par des underscores
+        const safeMatiere = matiere.replace(/[^a-z0-9]/gi, '_');
+        const safeClasse = classe.replace(/[^a-z0-9]/gi, '_');
+        const filename = `Plan de leçon-${safeMatiere}-${safeClasse}-S${week}-${seance}.docx`;
+
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
         res.send(buf);
@@ -215,4 +195,3 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
 });
 
 module.exports = app;
-
