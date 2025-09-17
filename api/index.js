@@ -58,29 +58,37 @@ function getDateForDayNameNode(weekStartDate, dayName) { if (!weekStartDate || i
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
 
 // ========================================================================
-// ========= NOUVELLE FONCTION: Détecte l'arabe et formate le texte =========
+// ========= FONCTION RTL/LTR AMÉLIORÉE ET ROBUSTE =========
 // ========================================================================
 const isArabic = (text) => /[\u0600-\u06FF]/.test(text);
 
 const formatTextForWord = (text) => {
-    if (!text) return "";
-    // Pour éviter les problèmes avec les caractères spéciaux XML dans le texte.
-    const escapedText = text.replace(/[&<>"']/g, (char) => {
-        return {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&apos;'
-        }[char];
+    if (!text || typeof text !== 'string') {
+        return "";
+    }
+
+    const escapeXml = (str) => {
+        return str.replace(/[<>&'"]/g, (c) => {
+            switch (c) {
+                case '<': return '&lt;';
+                case '>': return '&gt;';
+                case '&': return '&amp;';
+                case '\'': return '&apos;';
+                case '"': return '&quot;';
+            }
+        });
+    };
+
+    const lines = text.split('\n');
+    const processedLines = lines.map(line => {
+        const direction = isArabic(line) ? '<w:rtl/>' : '';
+        const escapedLine = escapeXml(line);
+        // Chaque ligne est enveloppée dans sa propre balise de texte pour garantir la validité XML
+        return `<w:r><w:rPr>${direction}</w:rPr><w:t xml:space="preserve">${escapedLine}</w:t></w:r>`;
     });
 
-    if (isArabic(text)) {
-        // Encapsule le texte dans des balises Word XML pour forcer la direction RTL (droite à gauche)
-        return `<w:r><w:rPr><w:rtl/></w:rPr><w:t>${escapedText}</w:t></w:r>`;
-    }
-    // Le texte LTR (gauche à droite) n'a pas besoin de balises spéciales
-    return escapedText;
+    // Les lignes sont jointes par une balise de saut de ligne Word
+    return processedLines.join('<w:br/>');
 };
 
 
@@ -92,7 +100,7 @@ app.post('/api/save-row', async (req, res) => { const weekNumber = parseInt(req.
 app.get('/api/all-classes', async (req, res) => { try { const db = await connectToDatabase(); const classes = await db.collection('plans').distinct('data.Classe', { 'data.Classe': { $ne: null, $ne: "" } }); res.status(200).json(classes.sort()); } catch (error) { console.error('Erreur MongoDB /api/all-classes:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 
 // ========================================================================
-// ========= ROUTE /generate-word MISE À JOUR POUR RTL/LTR =========
+// ========= ROUTE /generate-word CORRIGÉE AVEC NOUVELLE LOGIQUE =========
 // ========================================================================
 app.post('/api/generate-word', async (req, res) => {
     try {
@@ -111,22 +119,10 @@ app.post('/api/generate-word', async (req, res) => {
 
         const zip = new PizZip(templateBuffer);
         
-        // Configuration pour permettre le rendu XML brut
+        // On enlève linebreaks: true car notre fonction formatTextForWord s'en occupe
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
-            linebreaks: true,
-            nullGetter: () => "",
-            // parser: (tag) => {
-            //     return {
-            //         get: (scope) => {
-            //             if (tag === '.') return scope;
-            //             if (tag.startsWith('@')) {
-            //                 return scope[tag.substring(1)];
-            //             }
-            //             return scope[tag];
-            //         }
-            //     };
-            // }
+            nullGetter: () => ""
         });
         
         const groupedByDay = {};
@@ -154,10 +150,10 @@ app.post('/api/generate-word', async (req, res) => {
             if (groupedByDay[dayName] && groupedByDay[dayName].length > 0) {
                 const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
                 const matieres = sortedEntries.map(item => ({
+                    // On utilise le texte brut pour 'matiere' car il ne contient pas d'arabe et n'est pas formaté
                     matiere: item[matiereKey] ?? "",
-                    // ===== MODIFICATION : Formatage du texte pour Word =====
-                    // On utilise la nouvelle fonction pour traiter chaque champ.
-                    // IMPORTANT : Dans le template Word, utilisez {@Lecon}, {@travailDeClasse}, etc.
+                    // On utilise la nouvelle fonction robuste pour tous les champs qui peuvent contenir de l'arabe
+                    // IMPORTANT : Le template Word DOIT utiliser {@Lecon}, {@travailDeClasse}, etc.
                     Lecon: formatTextForWord(item[leconKey] ?? ""),
                     travailDeClasse: formatTextForWord(item[travauxKey] ?? ""),
                     Support: formatTextForWord(item[supportKey] ?? ""),
@@ -195,6 +191,9 @@ app.post('/api/generate-word', async (req, res) => {
 
     } catch (error) {
         console.error('❌ Erreur serveur /generate-word:', error);
+        if (error.properties && error.properties.errors) {
+             console.error('Erreurs Docxtemplater:', error.properties.errors);
+        }
         if (!res.headersSent) res.status(500).json({ message: 'Erreur interne /generate-word.' });
     }
 });
@@ -202,7 +201,7 @@ app.post('/api/generate-excel-workbook', async (req, res) => { try { const weekN
 app.post('/api/full-report-by-class', async (req, res) => { try { const { classe: requestedClass } = req.body; if (!requestedClass) return res.status(400).json({ message: 'Classe requise.' }); const db = await connectToDatabase(); const allPlans = await db.collection('plans').find({}).sort({ week: 1 }).toArray(); if (!allPlans || allPlans.length === 0) return res.status(404).json({ message: 'Aucune donnée.' }); const dataBySubject = {}; const monthsFrench = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]; allPlans.forEach(plan => { const weekNumber = plan.week; let monthName = 'N/A'; const weekDates = specificWeekDateRangesNode[weekNumber]; if (weekDates?.start) { try { const startDate = new Date(weekDates.start + 'T00:00:00Z'); monthName = monthsFrench[startDate.getUTCMonth()]; } catch (e) {} } (plan.data || []).forEach(item => { const itemClassKey = findKey(item, 'classe'); const itemSubjectKey = findKey(item, 'matière'); if (itemClassKey && item[itemClassKey] === requestedClass && itemSubjectKey && item[itemSubjectKey]) { const subject = item[itemSubjectKey]; if (!dataBySubject[subject]) dataBySubject[subject] = []; const row = { 'Mois': monthName, 'Semaine': weekNumber, 'Période': item[findKey(item, 'période')] || '', 'Leçon': item[findKey(item, 'leçon')] || '', 'Travaux de classe': item[findKey(item, 'travaux de classe')] || '', 'Support': item[findKey(item, 'support')] || '', 'Devoirs': item[findKey(item, 'devoirs')] || '' }; dataBySubject[subject].push(row); } }); }); const subjectsFound = Object.keys(dataBySubject); if (subjectsFound.length === 0) return res.status(404).json({ message: `Aucune donnée pour la classe '${requestedClass}'.` }); const workbook = XLSX.utils.book_new(); const headers = ['Mois', 'Semaine', 'Période', 'Leçon', 'Travaux de classe', 'Support', 'Devoirs']; subjectsFound.sort().forEach(subject => { const safeSheetName = subject.substring(0, 30).replace(/[*?:/\\\[\]]/g, '_'); const worksheet = XLSX.utils.json_to_sheet(dataBySubject[subject], { header: headers }); worksheet['!cols'] = [ { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 40 }, { wch: 40 }, { wch: 25 }, { wch: 40 } ]; XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName); }); const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }); const filename = `Rapport_Complet_${requestedClass.replace(/[^a-z0-9]/gi, '_')}.xlsx`; res.setHeader('Content-Disposition', `attachment; filename="${filename}"`); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buffer); } catch (error) { console.error('❌ Erreur serveur /full-report-by-class:', error); if (!res.headersSent) res.status(500).json({ message: 'Erreur interne du rapport.' }); } });
 
 // ========================================================================
-// ========= FONCTION IA MISE À JOUR AVEC NOM DE FICHIER CORRIGÉ =========
+// ========= FONCTION IA AVEC NOM DE FICHIER CORRIGÉ ET AMÉLIORÉ =========
 // ========================================================================
 app.post('/api/generate-ai-lesson-plan', async (req, res) => {
     try {
@@ -221,11 +220,11 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         }
         
         const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
-        const classe = rowData[findKey(rowData, 'Classe')] || '';
-        const matiere = rowData[findKey(rowData, 'Matière')] || '';
+        const classe = rowData[findKey(rowData, 'Classe')] || 'N/A';
+        const matiere = rowData[findKey(rowData, 'Matière')] || 'N/A';
         const lecon = rowData[findKey(rowData, 'Leçon')] || '';
         const jour = rowData[findKey(rowData, 'Jour')] || '';
-        const seance = rowData[findKey(rowData, 'Période')] || '';
+        const seance = rowData[findKey(rowData, 'Période')] || 'N/A';
         const support = rowData[findKey(rowData, 'Support')] || 'Non spécifié';
         const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
         const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
@@ -336,14 +335,14 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         
         const sanitizeForFilename = (str) => {
             if (typeof str !== 'string') str = String(str);
-            // Remplace les espaces par un tiret, supprime les caractères non autorisés.
-            return str.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+            // Remplace les espaces et caractères non alphanumériques par un simple tiret
+            return str.replace(/[^a-zA-Z0-9-]/g, '-').replace(/-+/g, '-');
         };
         
         // ========================================================================
-        // ========= MODIFICATION : Format du nom de fichier mis à jour =========
+        // ========= NOM DE FICHIER MIS À JOUR SELON LE FORMAT DEMANDÉ =========
         // ========================================================================
-        const filename = `Plan de lecon - ${sanitizeForFilename(matiere)} -Seance ${sanitizeForFilename(seance)}- Classe ${sanitizeForFilename(classe)}-Semaine ${weekNumber}.docx`;
+        const filename = `Plan de lecon - ${sanitizeForFilename(matiere)} - Seance ${sanitizeForFilename(seance)} - Classe ${sanitizeForFilename(classe)} - Semaine ${weekNumber}.docx`;
         
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
