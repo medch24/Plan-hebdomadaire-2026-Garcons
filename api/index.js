@@ -39,8 +39,7 @@ const specificWeekDateRangesNode = {
 const validUsers = {
    "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Imad": "Imad", "Kamel": "Kamel",
     "Majed": "Majed", "Mohamed Ali": "Mohamed Ali", "Morched": "Morched",
-    "Saeed": "Saeed", "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga",
-    "Oumaro": "Oumaro", "Zine": "Zine"
+    "Saeed": "Saeed", "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga", "Oumarou": "Oumarou", "Zine": "Zine"
 };
 
 let cachedDb = null;
@@ -228,4 +227,5 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
 });
 
 module.exports = app;
+
 
