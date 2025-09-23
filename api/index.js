@@ -228,4 +228,3 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
 });
 
 module.exports = app;
-
