@@ -29,7 +29,7 @@ if (process.env.GEMINI_API_KEY) {
     console.warn('⚠️ GEMINI_API_KEY non défini. La fonctionnalité IA sera désactivée.');
 }
 
-const arabicTeachers = ['Majed', 'Jaber', 'Saeed'];
+const arabicTeachers = ['Majed', 'Jaber', 'Imad', 'Saeed'];
         const englishTeachers = ['Kamel'];
 
 const specificWeekDateRangesNode = {
@@ -37,7 +37,7 @@ const specificWeekDateRangesNode = {
 };
 
 const validUsers = {
-   "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Kamel": "Kamel",
+   "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Imad": "Imad", "Kamel": "Kamel",
     "Majed": "Majed", "Mohamed Ali": "Mohamed Ali", "Morched": "Morched",
     "Saeed": "Saeed", "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga",
     "Youssef": "Youssef", "Zine": "Zine"
@@ -228,3 +228,4 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
 });
 
 module.exports = app;
+
