@@ -40,7 +40,7 @@ const validUsers = {
    "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Imad": "Imad", "Kamel": "Kamel",
     "Majed": "Majed", "Mohamed Ali": "Mohamed Ali", "Morched": "Morched",
     "Saeed": "Saeed", "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga",
-    "Youssef": "Youssef", "Zine": "Zine"
+    "Oumaro": "Oumaro", "Zine": "Zine"
 };
 
 let cachedDb = null;
@@ -228,3 +228,4 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
 });
 
 module.exports = app;
+
