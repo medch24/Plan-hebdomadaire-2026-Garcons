@@ -39,6 +39,7 @@ const formatTextForWord = (text) => {
     return `<w:r><w:t>${textWithLineBreaks}</w:t></w:r>`;
 };
 
+
 const app = express();
 
 app.use(cors());
@@ -111,16 +112,12 @@ app.post('/api/generate-word', async (req, res) => {
         
         const zip = new PizZip(templateBuffer);
         
+        // ===== CORRECTION APPLIQUÉE ICI =====
+        // L'option "parser" a été supprimée.
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
             linebreaks: true,
-            nullGetter: () => "",
-            parser: (tag) => {
-                if (tag.charAt(0) === '@') {
-                    return { type: "raw", value: tag.substring(1), module: "rawxml" };
-                }
-                return { type: "placeholder", value: tag };
-            }
+            nullGetter: () => ""
         });
 
         const groupedByDay = {};
