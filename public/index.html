@@ -41,22 +41,25 @@
     <!-- FORMULAIRE DE CONNEXION  -->
     <!-- ======================== -->
     <div id="login-form">
-        <img id="logo"
-             src="https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299"
-             alt="Logo Al-Kawthar">
-        <h1>Connexion</h1> <!-- Traduit par JS si besoin -->
-        <div>
-            <label for="username">Nom d'utilisateur (Enseignant) :</label> <!-- Traduit par JS si besoin -->
-            <input type="text" id="username" name="username" required>
+        <!-- MODIFIÉ ICI : Ajout de la div "login-card" pour le style -->
+        <div class="login-card">
+            <img id="logo"
+                 src="https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299"
+                 alt="Logo Al-Kawthar">
+            <h1>Connexion</h1> <!-- Traduit par JS si besoin -->
+            <div>
+                <label for="username">Nom d'utilisateur (Enseignant) :</label> <!-- Traduit par JS si besoin -->
+                <input type="text" id="username" name="username" required>
+            </div>
+            <div class="password-container">
+                <label for="password">Mot de passe (idem Nom) :</label> <!-- Traduit par JS si besoin -->
+                <input type="password" id="password" name="password" required>
+                <i class="fas fa-eye password-toggle-icon" id="togglePassword"></i>
+            </div>
+            
+            <button id="login-button" class="pro-button"><i class="fas fa-sign-in-alt"></i> <span class="btn-text">Se connecter</span></button> <!-- Texte traduit par JS si besoin -->
+            <p id="login-error"></p>
         </div>
-        <div class="password-container">
-            <label for="password">Mot de passe (idem Nom) :</label> <!-- Traduit par JS si besoin -->
-            <input type="password" id="password" name="password" required>
-            <i class="fas fa-eye password-toggle-icon" id="togglePassword"></i>
-        </div>
-        
-        <button id="login-button" class="pro-button"><i class="fas fa-sign-in-alt"></i> <span class="btn-text">Se connecter</span></button> <!-- Texte traduit par JS si besoin -->
-        <p id="login-error"></p>
     </div>
 
     <!-- ======================== -->
@@ -238,6 +241,7 @@
     <!-- SCRIPT JAVASCRIPT        -->
     <!-- ======================== -->
     <script>
+        // Le code Javascript reste inchangé
         // --- Début Script ---
         console.log("Script principal démarré.");
 
