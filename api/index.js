@@ -9,8 +9,20 @@ const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
 
 // ========================================================================
-// ========= NOUVELLES FONCTIONS D'AIDE POUR LA GÉNÉRATION WORD =========
+// ========= FONCTIONS D'AIDE POUR LA GÉNÉRATION WORD (CORRIGÉES) ========
 // ========================================================================
+
+/**
+ * Échappe les caractères spéciaux XML pour éviter la corruption du document.
+ * @param {string} str La chaîne de caractères à échapper.
+ * @returns {string} La chaîne échappée.
+ */
+const xmlEscape = (str) => {
+  if (typeof str !== 'string') return '';
+  return str.replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+};
 
 /**
  * Détecte si une chaîne de caractères contient des caractères arabes.
@@ -24,7 +36,7 @@ const containsArabic = (text) => {
 };
 
 /**
- * Formate le texte pour docxtemplater en gérant les sauts de ligne et le texte de droite à gauche (RTL) pour l'arabe.
+ * Formate le texte pour docxtemplater en gérant les sauts de ligne, les caractères spéciaux et le texte RTL.
  * @param {string} text Le texte brut à formater.
  * @returns {string} Une chaîne XML prête à être insérée dans un champ raw ('@...') de docxtemplater.
  */
@@ -32,11 +44,20 @@ const formatTextForWord = (text) => {
     if (!text || typeof text !== 'string') {
         return "";
     }
-    const textWithLineBreaks = text.replace(/\r\n|\n|\r/g, '<w:br/>');
+    // 1. Diviser le texte en lignes en fonction des différents types de sauts de ligne
+    const lines = text.split(/\r\n|\n|\r/);
+    
+    // 2. Échapper chaque ligne individuellement pour préserver les caractères spéciaux
+    const escapedLines = lines.map(xmlEscape);
+    
+    // 3. Joindre les lignes avec la balise de saut de ligne XML de Word
+    const content = escapedLines.join('<w:br/>');
+
+    // 4. Appliquer la directionnalité si nécessaire et envelopper dans les balises finales
     if (containsArabic(text)) {
-        return `<w:r><w:rPr><w:rtl/></w:rPr><w:t>${textWithLineBreaks}</w:t></w:r>`;
+        return `<w:r><w:rPr><w:rtl/></w:rPr><w:t>${content}</w:t></w:r>`;
     }
-    return `<w:r><w:t>${textWithLineBreaks}</w:t></w:r>`;
+    return `<w:r><w:t>${content}</w:t></w:r>`;
 };
 
 
@@ -112,8 +133,6 @@ app.post('/api/generate-word', async (req, res) => {
         
         const zip = new PizZip(templateBuffer);
         
-        // ===== CORRECTION APPLIQUÉE ICI =====
-        // L'option "parser" a été supprimée.
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
             linebreaks: true,
