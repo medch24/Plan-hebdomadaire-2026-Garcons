@@ -1,18 +1,3 @@
-Même si cette ligne est dans un commentaire, certains outils de déploiement (comme celui de Vercel) peuvent essayer d'analyser ces commentaires (appelés JSDoc). L'outil a mal interprété la séquence `{@...}` et a généré une erreur de syntaxe.
-
-**Solution :**
-
-La solution est très simple : il suffit de modifier légèrement ce commentaire pour qu'il ne puisse pas être mal interprété. Je vais simplement remplacer les accolades `{}` par des apostrophes `' '`.
-
-Voici le code corrigé pour le fichier `api/index.js`. C'est la **seule** modification nécessaire. Les autres fichiers (`index.html`, `style.css`, etc.) sont corrects et n'ont pas besoin d'être changés.
-
----
-
-### Fichier : `api/index.js` (Corrigé)
-
-Copiez et collez l'intégralité de ce code dans votre fichier `api/index.js`. La seule différence se trouve dans le commentaire de la fonction `formatTextForWord`.
-
-```javascript
 const express = require('express');
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
@@ -34,7 +19,6 @@ const { MongoClient } = require('mongodb');
  */
 const containsArabic = (text) => {
     if (typeof text !== 'string') return false;
-    // Plage Unicode pour les caractères arabes de base
     const arabicRegex = /[\u0600-\u06FF]/;
     return arabicRegex.test(text);
 };
@@ -45,26 +29,15 @@ const containsArabic = (text) => {
  * @returns {string} Une chaîne XML prête à être insérée dans un champ raw ('@...') de docxtemplater.
  */
 const formatTextForWord = (text) => {
-    // Si le texte est vide, retourner une chaîne vide pour éviter les erreurs
     if (!text || typeof text !== 'string') {
         return "";
     }
-    
-    // 1. Remplacer les sauts de ligne (provenant des textarea) par la balise Word XML <w:br/>
-    // Utilise une expression régulière pour gérer les différents types de sauts de ligne (\r\n, \n, \r)
     const textWithLineBreaks = text.replace(/\r\n|\n|\r/g, '<w:br/>');
-    
-    // 2. Vérifier si le texte contient de l'arabe pour appliquer la directionnalité RTL
     if (containsArabic(text)) {
-        // Envelopper le texte dans des balises Word XML qui forcent la direction de droite à gauche
         return `<w:r><w:rPr><w:rtl/></w:rPr><w:t>${textWithLineBreaks}</w:t></w:r>`;
     }
-    
-    // 3. Pour les autres langues, retourner le texte avec les sauts de ligne formatés
-    // L'enveloppe <w:t> est nécessaire pour que les balises <w:br/> soient correctement interprétées
     return `<w:r><w:t>${textWithLineBreaks}</w:t></w:r>`;
 };
-
 
 const app = express();
 
@@ -88,7 +61,7 @@ if (process.env.GEMINI_API_KEY) {
 }
 
 const arabicTeachers = ['Majed', 'Jaber', 'Imad', 'Saeed'];
-        const englishTeachers = ['Kamel'];
+const englishTeachers = ['Kamel'];
 
 const specificWeekDateRangesNode = {
   1:{start:'2025-08-31',end:'2025-09-04'}, 2:{start:'2025-09-07',end:'2025-09-11'}, 3:{start:'2025-09-14',end:'2025-09-18'}, 4:{start:'2025-09-21',end:'2025-09-25'}, 5:{start:'2025-09-28',end:'2025-10-02'}, 6:{start:'2025-10-05',end:'2025-10-09'}, 7:{start:'2025-10-12',end:'2025-10-16'}, 8:{start:'2025-10-19',end:'2025-10-23'}, 9:{start:'2025-10-26',end:'2025-10-30'},10:{start:'2025-11-02',end:'2025-11-06'}, 11:{start:'2025-11-09',end:'2025-11-13'},12:{start:'2025-11-16',end:'2025-11-20'}, 13:{start:'2025-11-23',end:'2025-11-27'},14:{start:'2025-11-30',end:'2025-12-04'}, 15:{start:'2025-12-07',end:'2025-12-11'},16:{start:'2025-12-14',end:'2025-12-18'}, 17:{start:'2025-12-21',end:'2025-12-25'},18:{start:'2025-12-28',end:'2026-01-01'}, 19:{start:'2026-01-04',end:'2026-01-08'},20:{start:'2026-01-11',end:'2026-01-15'}, 21:{start:'2026-01-18',end:'2026-01-22'},22:{start:'2026-01-25',end:'2026-01-29'}, 23:{start:'2026-02-01',end:'2026-02-05'},24:{start:'2026-02-08',end:'2026-02-12'}, 25:{start:'2026-02-15',end:'2026-02-19'},26:{start:'2026-02-22',end:'2026-02-26'}, 27:{start:'2026-03-01',end:'2026-03-05'},28:{start:'2026-03-08',end:'2026-03-12'}, 29:{start:'2026-03-15',end:'2026-03-19'},30:{start:'2026-03-22',end:'2026-03-26'}, 31:{start:'2026-03-29',end:'2026-04-02'},32:{start:'2026-04-05',end:'2026-04-09'}, 33:{start:'2026-04-12',end:'2026-04-16'},34:{start:'2026-04-19',end:'2026-04-23'}, 35:{start:'2026-04-26',end:'2026-04-30'},36:{start:'2026-05-03',end:'2026-05-07'}, 37:{start:'2026-05-10',end:'2026-05-14'},38:{start:'2026-05-17',end:'2025-05-21'}, 39:{start:'2026-05-24',end:'2026-05-28'},40:{start:'2026-05-31',end:'2026-06-04'}, 41:{start:'2026-06-07',end:'2026-06-11'},42:{start:'2026-06-14',end:'2026-06-18'}, 43:{start:'2026-06-21',end:'2026-06-25'},44:{start:'2026-06-28',end:'2026-07-02'}, 45:{start:'2026-07-05',end:'2026-07-09'},46:{start:'2026-07-12',end:'2026-07-16'}, 47:{start:'2026-07-19',end:'2026-07-23'},48:{start:'2026-07-26',end:'2026-07-30'}
