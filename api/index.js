@@ -9,14 +9,9 @@ const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
 
 // ========================================================================
-// ========= FONCTIONS D'AIDE POUR LA GÉNÉRATION WORD (CORRIGÉES) ========
+// ========= FONCTIONS D'AIDE POUR LA GÉNÉRATION WORD (FINALES) ==========
 // ========================================================================
 
-/**
- * Échappe les caractères spéciaux XML pour éviter la corruption du document.
- * @param {string} str La chaîne de caractères à échapper.
- * @returns {string} La chaîne échappée.
- */
 const xmlEscape = (str) => {
   if (typeof str !== 'string') return '';
   return str.replace(/&/g, '&amp;')
@@ -24,42 +19,36 @@ const xmlEscape = (str) => {
             .replace(/>/g, '&gt;');
 };
 
-/**
- * Détecte si une chaîne de caractères contient des caractères arabes.
- * @param {string} text Le texte à vérifier.
- * @returns {boolean} Vrai si du texte arabe est trouvé.
- */
 const containsArabic = (text) => {
     if (typeof text !== 'string') return false;
-    const arabicRegex = /[\u0600-\u06FF]/;
-    return arabicRegex.test(text);
+    const arabicRegex = /[\u0000-\u007F]/; // Cherche si il y a des caractères NON arabes/latins
+    // Simple test to check if the text contains non-latin characters, assuming it's arabic
+    return !arabicRegex.test(text.replace(/\s/g, ''));
 };
 
-/**
- * Formate le texte pour docxtemplater en générant un paragraphe Word XML complet.
- * @param {string} text Le texte brut à formater.
- * @returns {string} Une chaîne XML représentant un paragraphe complet (<w:p>).
- */
 const formatTextForWord = (text) => {
-    // Si le texte est vide ou non valide, retourner un paragraphe vide. C'est plus sûr qu'une chaîne vide.
     if (!text || typeof text !== 'string' || text.trim() === '') {
-        return '<w:p/>'; 
+        return '<w:p/>';
     }
 
     const lines = text.split(/\r\n|\n|\r/);
-    const escapedLines = lines.map(xmlEscape);
-    const contentWithBreaks = escapedLines.join('<w:br/>');
+    
+    // Génère une "run" (<w:r>) pour chaque ligne. C'est plus robuste que de tout mettre dans un seul <w:t>.
+    const runs = lines.map(line => {
+        const escapedLine = xmlEscape(line);
+        // Les lignes vides sont transformées en <w:br/>, sauf la première.
+        if (escapedLine === '') {
+            return '<w:br/>';
+        }
+        // Pour l'arabe, on applique la propriété RTL sur la "run" de texte.
+        if (containsArabic(line)) {
+            return `<w:r><w:rPr><w:rtl/></w:rPr><w:t xml:space="preserve">${escapedLine}</w:t></w:r>`;
+        }
+        return `<w:r><w:t xml:space="preserve">${escapedLine}</w:t></w:r>`;
+    }).join('');
 
-    // Construire les propriétés du paragraphe. Pour l'arabe, on ajoute la propriété bidi (bi-directionnel).
-    let paragraphProps = '';
-    if (containsArabic(text)) {
-        paragraphProps = '<w:pPr><w:bidi/></w:pPr>';
-    }
-
-    // Construire le paragraphe complet.
-    // Chaque paragraphe contient une "run" (<w:r>) qui contient le texte (<w:t>).
-    // xml:space="preserve" est crucial pour que Word ne supprime pas les espaces.
-    return `<w:p>${paragraphProps}<w:r><w:t xml:space="preserve">${contentWithBreaks}</w:t></w:r></w:p>`;
+    // Les "runs" sont placées à l'intérieur d'un seul paragraphe <w:p>
+    return `<w:p>${runs}</w:p>`;
 };
 
 
