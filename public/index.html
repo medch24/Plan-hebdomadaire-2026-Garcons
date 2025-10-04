@@ -23,7 +23,6 @@
     <!-- Lien vers VOTRE fichier CSS (style.css) - Assurez-vous qu'il est à jour -->
     <link rel="stylesheet" href="style.css">
     
-    <!-- ===== NOUVEAU : Style pour le positionnement du bouton ===== -->
     <style>
         .table-actions-container {
             display: flex;
@@ -41,7 +40,6 @@
     <!-- FORMULAIRE DE CONNEXION  -->
     <!-- ======================== -->
     <div id="login-form">
-        <!-- MODIFIÉ ICI : Ajout de la div "login-card" pour le style -->
         <div class="login-card">
             <img id="logo"
                  src="https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299"
@@ -133,7 +131,7 @@
                 </button>
              </div>
 
-             <div style="width: 100%; margin-top: 10px; font-size: 0.85em; color: var(--muted-text); border-top: 1px dashed var(--border-color); padding-top: 10px;">
+             <div style="width: 100%; margin-top: 10px; font-size: 0.85em; color: var(--muted-text-color); border-top: 1px dashed var(--border-color); padding-top: 10px;">
                  <i class="fas fa-info-circle"></i> **Note:** La fonction d'upload et d'extraction automatique depuis des fichiers Word ou PDF n'est pas implémentée dans cette version. Veuillez utiliser le format Excel pour charger les données via le bouton ci-dessus.
              </div>
         </div>
@@ -150,7 +148,6 @@
             <button id="generateExcelBtn" onclick="generateExcelWorkbook()" class="action-button pro-button" disabled>
                  <i class="fas fa-file-excel"></i> <span class="btn-text">Générer Excel (1 Fichier)</span> <!-- Traduit par JS -->
             </button>
-             <!-- ===== MODIFIÉ : Le bouton Enregistrer Lignes a été déplacé ===== -->
             <a id="downloadLink" style="display:none;"></a>
         </div>
 
@@ -223,7 +220,6 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <!-- Données générées par JS (displayPlanTable) -->
                      <!-- Message initial (sera remplacé par JS) -->
                      <tr id="initial-table-row">
                          <td colspan="10" style="text-align:center; padding: 20px; color: grey;" id="initial-table-message">
@@ -241,7 +237,6 @@
     <!-- SCRIPT JAVASCRIPT        -->
     <!-- ======================== -->
     <script>
-        // Le code Javascript reste inchangé
         // --- Début Script ---
         console.log("Script principal démarré.");
 
@@ -339,7 +334,6 @@
         function toggleIncompleteList() { const listDiv=document.getElementById('incompleteTeachersDisplay'); const btn=document.getElementById('toggleIncompleteBtn'); const btnTextSpan = btn.querySelector('.btn-text'); if(listDiv.style.display==='none'||listDiv.style.display===''){ listDiv.style.display='block'; btn.querySelector('i').className = 'fas fa-xmark'; if(btnTextSpan) btnTextSpan.textContent = t('hide_incomplete'); } else { listDiv.style.display='none'; btn.querySelector('i').className = 'fas fa-list-check'; if(btnTextSpan) btnTextSpan.textContent = t('display_incomplete'); } }
         async function fetchPlanData(week) { if (!week || isNaN(parseInt(week, 10))) { console.warn("fetchPlanData sans semaine valide."); displayPlanTable([]); document.getElementById('weekDateRange').textContent = t('please_select_week'); return; } if (!loggedInUser) { console.warn("Tentative chargement non connecté."); displayAlert("login_title", true); return; } console.log(`fetchPlanData S${week} pour ${loggedInUser}`); displayAlert('loading_data_week', false, { week: week }); showProgressBar(); updateProgressBar(10); currentWeek = week; const weekNum=parseInt(week,10); const dateRangeEl=document.getElementById('weekDateRange'); weekStartDate=null; planData=[]; headers=[]; weeklyClassNotes={}; dateRangeEl.textContent=`${t('week_label')} ${week}: ${t('loading')}`; displayPlanTable([]); updateActionButtonsState(false); const dates=specificWeekDateRanges[weekNum]; if(dates?.start&&dates?.end){try{const s=new Date(dates.start+'T00:00:00Z'); const e=new Date(dates.end+'T00:00:00Z'); if(!isNaN(s.getTime())&&!isNaN(e.getTime())){ weekStartDate=s; dateRangeEl.textContent = `${t('week_label')} ${week} : ${isArabicUser() ? 'من' : (currentUserLanguage === 'en' ? 'from' : 'du')} ${formatDateForDisplay(s)} ${isArabicUser() ? 'إلى' : (currentUserLanguage === 'en' ? 'to' : 'à')} ${formatDateForDisplay(e)}`;} else throw new Error();}catch(e){dateRangeEl.textContent=`S ${week} (Err dates)`; weekStartDate=null;}} else {dateRangeEl.textContent=`${t('week_label')} ${week} (${t('no_data')}: dates non définies)`; weekStartDate=null;} updateProgressBar(30); try{const r=await fetch(`/api/plans/${week}`); updateProgressBar(70); if(!r.ok){const d=await r.json().catch(()=>null); throw new Error(d?.message || `Err ${r.status}`);} const fetched=await r.json(); if(fetched&&typeof fetched==='object'){planData=fetched.planData||[]; weeklyClassNotes=fetched.classNotes||{};} else {planData=[]; weeklyClassNotes={};} updateProgressBar(90); if(planData.length>0){headers=Object.keys(planData[0]).filter(h=>h!=='_id'&&h!=='id'); if(loggedInUser==='Imad'){const enseignantKey=findHKey('Enseignant');const originalCount=planData.length;if(enseignantKey){planData=planData.filter(row=>arabicTeachers.includes(row[enseignantKey]));console.log(`[Imad Admin] Data filtered for Arabic teachers. ${planData.length}/${originalCount} rows remain.`)}} displayAlert('data_loaded_week', false, { week: week });} else {headers=[]; displayAlert('no_data_found_week', false, { week: week });} createTableHeader(); populateFilterOptions(); populateNotesClassSelector(); sortAndDisplay(); displayClassNotes(); checkAndDisplayIncompleteTeachers(); updateActionButtonsState(planData.length > 0); updateProgressBar(100); } catch(e){ console.error("Err fetchPlanData:",e); displayAlert('error_loading_week', true, { week: week, error: e.message }); planData=[]; headers=[]; weeklyClassNotes={}; createTableHeader(); populateFilterOptions(); populateNotesClassSelector(); sortAndDisplay(); displayClassNotes(); checkAndDisplayIncompleteTeachers(); updateProgressBar(0); updateActionButtonsState(false); } finally{hideProgressBar();} }
         
-        // ===== MODIFIÉ : Logique pour masquer les colonnes =====
         function createTableHeader() {
             const tHead = document.querySelector('#planTable thead tr');
             tHead.innerHTML = '';
@@ -352,9 +346,8 @@
 
             if (hDisp.length > 0) {
                 hDisp.forEach(h => {
-                    // Si l'utilisateur est un enseignant d'arabe, on saute les colonnes 'Leçon' et 'Support'
                     if (arabicTeachers.includes(loggedInUser) && (h === leconKey || h === supportKey)) {
-                        return; // Ne pas créer cet en-tête de colonne
+                        return;
                     }
                     
                     const th = document.createElement('th');
@@ -382,7 +375,6 @@
         function populateFilterOptions() { const data = planData || []; const getUniq = (k) => { const uniq = new Set(); data.forEach(i => { if (i && i[k] != null && i[k] !== '') { uniq.add(i[k]); } }); if (k?.trim().toLowerCase() === 'classe') { return [...uniq].sort(compareClasses); } else { return [...uniq].sort((a, b) => String(a).localeCompare(String(b))); } }; const ensK = findHKey('Enseignant'); const clsK = findHKey('Classe'); const perK = findHKey('Période'); const matK = findHKey('Matière'); const ens = ensK ? getUniq(ensK) : []; const cls = clsK ? getUniq(clsK) : []; const per = perK ? getUniq(perK) : []; const mat = matK ? getUniq(matK) : []; const updateSel = (id, opts, isCls = false) => { const sel = document.getElementById(id); const curV = sel.value; const defaultOptHTML = sel.querySelector('option[value=""]')?.outerHTML || `<option value="">${t(isCls ? 'all_f' : 'all')}</option>`; sel.innerHTML = defaultOptHTML; opts.forEach(o => { const opt = document.createElement('option'); opt.value = o; if (isCls) { const ar = classTranslations[o]; opt.textContent = ar ? `${ar} (${o})` : o; } else { opt.textContent = o; } sel.appendChild(opt); }); if (opts.includes(curV)) { sel.value = curV; } else { sel.value = ""; } }; updateSel('filterEnseignant', ens); updateSel('filterClasse', cls, true); updateSel('filterPeriode', per); updateSel('filterMatiere', mat); updateFilterOptionDefaultTexts(); const filterEnsSelect = document.getElementById('filterEnseignant'); if(loggedInUser&&loggedInUser!=='Mohamed'&&loggedInUser!=='Zohra'&&loggedInUser!=='Imad'){ filterEnsSelect.value = loggedInUser; filterEnsSelect.disabled = true; } else { filterEnsSelect.disabled = false; } }
         function sortAndDisplay() { const filterEnsSelect = document.getElementById('filterEnseignant'); if(loggedInUser&&loggedInUser!=='Mohamed'&&loggedInUser!=='Zohra'&&loggedInUser!=='Imad'){ filterEnsSelect.value = loggedInUser; filterEnsSelect.disabled = true; } else { filterEnsSelect.disabled = false; } const ensF = filterEnsSelect.value; const clsF = document.getElementById('filterClasse').value; const matF = document.getElementById('filterMatiere').value; const perF = document.getElementById('filterPeriode').value; const jF = document.getElementById('filterJour').value; const ensK = findHKey('Enseignant'); const clsK = findHKey('Classe'); const matK = findHKey('Matière'); const perK = findHKey('Période'); const jK = findHKey('Jour'); filteredAndSortedData = planData.filter(i => { if (!i) return false; const iE = ensK && i.hasOwnProperty(ensK) ? String(i[ensK]) : null; const iC = clsK && i.hasOwnProperty(clsK) ? String(i[clsK]) : null; const iM = matK && i.hasOwnProperty(matK) ? String(i[matK]) : null; const iP = perK && i.hasOwnProperty(perK) ? String(i[perK]) : null; const iJ = jK && i.hasOwnProperty(jK) ? String(i[jK]) : null; const pE = !ensF || iE === ensF; const pC = !clsF || iC === clsF; const pM = !matF || iM === matF; const pP = !perF || iP === perF; const pJ = !jF || iJ === jF; return pE && pC && pM && pP && pJ; }); const dayValuesFr = { "Dimanche": 1, "Lundi": 2, "Mardi": 3, "Mercredi": 4, "Jeudi": 5 }; filteredAndSortedData.sort((a, b) => { const classA = (clsK && a.hasOwnProperty(clsK)) ? a[clsK] : null; const classB = (clsK && b.hasOwnProperty(clsK)) ? b[clsK] : null; const classComp = compareClasses(classA, classB); if (classComp !== 0) return classComp; const jA_fr = (jK && a.hasOwnProperty(jK)) ? String(a[jK]) : null; const jB_fr = (jK && b.hasOwnProperty(jK)) ? String(b[jK]) : null; const dayOrdA = dayValuesFr[jA_fr] || 99; const dayOrdB = dayValuesFr[jB_fr] || 99; const dC = dayOrdA - dayOrdB; if (dC !== 0) return dC; const pA = (perK && a.hasOwnProperty(perK)) ? a[perK] : null; const pB = (perK && b.hasOwnProperty(perK)) ? b[perK] : null; const piA = parseInt(pA, 10); const piB = parseInt(pB, 10); if (!isNaN(piA) && !isNaN(piB)) { return piA - piB; } else { const sA = pA == null ? '' : String(pA); const sB = pB == null ? '' : String(pB); return sA.localeCompare(sB); } }); displayPlanTable(filteredAndSortedData); updateActionButtonsState(filteredAndSortedData.length > 0); }
         
-        // ===== MODIFIÉ : Logique pour afficher les cellules du tableau =====
         function displayPlanTable(data) {
             const tBody = document.querySelector('#planTable tbody');
             const tHead = document.querySelector('#planTable thead tr');
@@ -415,9 +407,8 @@
                 const tr = document.createElement('tr');
                 tr.dataset.rowIndex = rIdx;
                 hDisp.forEach(header => {
-                    // Si l'utilisateur est un enseignant d'arabe, on saute les cellules 'Leçon' et 'Support'
                     if (arabicTeachers.includes(loggedInUser) && (header === leconKey || header === supportKey)) {
-                        return; // Ne pas créer cette cellule
+                        return;
                     }
                     
                     const td = document.createElement('td');
@@ -461,7 +452,7 @@
                 const aiLessonBtn = document.createElement('button');
                 aiLessonBtn.innerHTML = '<i class="fas fa-robot"></i>';
                 aiLessonBtn.title = t('generate_ai_lesson_plan_button');
-                aiLessonBtn.classList.add('ai-lesson-plan-button', 'pro-button');
+                aiLessonBtn.classList.add('ai-lesson-plan-button');
                 aiLessonBtn.style.marginLeft = '5px';
                 aiLessonBtn.onclick = () => generateAILessonPlan(rowObj, tr);
                 actTd.appendChild(aiLessonBtn);
@@ -510,7 +501,8 @@
             
             document.getElementById('loggedInUserInfo').textContent = t('connected_as', { user: loggedInUser });
             
-            if (loggedInUser === 'Mohamed' || loggedInUser === 'Zohra' || loggedInUser === 'Imad') { 
+            // ===== MODIFICATION APPLIQUÉE ICI =====
+            if (loggedInUser === 'Mohamed') { 
                 document.getElementById('admin-actions').style.display = 'flex';
                 populateAdminReportClassSelector();
             } else {
