@@ -44,20 +44,14 @@ const formatTextForWord = (text) => {
     if (!text || typeof text !== 'string') {
         return "";
     }
-    // 1. Diviser le texte en lignes en fonction des différents types de sauts de ligne
     const lines = text.split(/\r\n|\n|\r/);
-    
-    // 2. Échapper chaque ligne individuellement pour préserver les caractères spéciaux
     const escapedLines = lines.map(xmlEscape);
-    
-    // 3. Joindre les lignes avec la balise de saut de ligne XML de Word
     const content = escapedLines.join('<w:br/>');
 
-    // 4. Appliquer la directionnalité si nécessaire et envelopper dans les balises finales
     if (containsArabic(text)) {
-        return `<w:r><w:rPr><w:rtl/></w:rPr><w:t>${content}</w:t></w:r>`;
+        return `<w:r><w:rPr><w:rtl/></w:rPr><w:t xml:space="preserve">${content}</w:t></w:r>`;
     }
-    return `<w:r><w:t>${content}</w:t></w:r>`;
+    return `<w:r><w:t xml:space="preserve">${content}</w:t></w:r>`;
 };
 
 
@@ -133,9 +127,10 @@ app.post('/api/generate-word', async (req, res) => {
         
         const zip = new PizZip(templateBuffer);
         
+        // ===== CORRECTION APPLIQUÉE ICI =====
+        // L'option "linebreaks: true" a été supprimée pour éviter les conflits.
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
-            linebreaks: true,
             nullGetter: () => ""
         });
 
