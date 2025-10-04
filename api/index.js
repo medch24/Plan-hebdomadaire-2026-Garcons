@@ -36,22 +36,30 @@ const containsArabic = (text) => {
 };
 
 /**
- * Formate le texte pour docxtemplater en gérant les sauts de ligne, les caractères spéciaux et le texte RTL.
+ * Formate le texte pour docxtemplater en générant un paragraphe Word XML complet.
  * @param {string} text Le texte brut à formater.
- * @returns {string} Une chaîne XML prête à être insérée dans un champ raw ('@...') de docxtemplater.
+ * @returns {string} Une chaîne XML représentant un paragraphe complet (<w:p>).
  */
 const formatTextForWord = (text) => {
-    if (!text || typeof text !== 'string') {
-        return "";
+    // Si le texte est vide ou non valide, retourner un paragraphe vide. C'est plus sûr qu'une chaîne vide.
+    if (!text || typeof text !== 'string' || text.trim() === '') {
+        return '<w:p/>'; 
     }
+
     const lines = text.split(/\r\n|\n|\r/);
     const escapedLines = lines.map(xmlEscape);
-    const content = escapedLines.join('<w:br/>');
+    const contentWithBreaks = escapedLines.join('<w:br/>');
 
+    // Construire les propriétés du paragraphe. Pour l'arabe, on ajoute la propriété bidi (bi-directionnel).
+    let paragraphProps = '';
     if (containsArabic(text)) {
-        return `<w:r><w:rPr><w:rtl/></w:rPr><w:t xml:space="preserve">${content}</w:t></w:r>`;
+        paragraphProps = '<w:pPr><w:bidi/></w:pPr>';
     }
-    return `<w:r><w:t xml:space="preserve">${content}</w:t></w:r>`;
+
+    // Construire le paragraphe complet.
+    // Chaque paragraphe contient une "run" (<w:r>) qui contient le texte (<w:t>).
+    // xml:space="preserve" est crucial pour que Word ne supprime pas les espaces.
+    return `<w:p>${paragraphProps}<w:r><w:t xml:space="preserve">${contentWithBreaks}</w:t></w:r></w:p>`;
 };
 
 
@@ -127,8 +135,6 @@ app.post('/api/generate-word', async (req, res) => {
         
         const zip = new PizZip(templateBuffer);
         
-        // ===== CORRECTION APPLIQUÉE ICI =====
-        // L'option "linebreaks: true" a été supprimée pour éviter les conflits.
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
             nullGetter: () => ""
