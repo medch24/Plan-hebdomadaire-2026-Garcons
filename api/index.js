@@ -1,3 +1,17 @@
+Même si cette ligne est dans un commentaire, certains outils de déploiement (comme celui de Vercel) peuvent essayer d'analyser ces commentaires (appelés JSDoc). L'outil a mal interprété la séquence `{@...}` et a généré une erreur de syntaxe.
+
+**Solution :**
+
+La solution est très simple : il suffit de modifier légèrement ce commentaire pour qu'il ne puisse pas être mal interprété. Je vais simplement remplacer les accolades `{}` par des apostrophes `' '`.
+
+Voici le code corrigé pour le fichier `api/index.js`. C'est la **seule** modification nécessaire. Les autres fichiers (`index.html`, `style.css`, etc.) sont corrects et n'ont pas besoin d'être changés.
+
+---
+
+### Fichier : `api/index.js` (Corrigé)
+
+Copiez et collez l'intégralité de ce code dans votre fichier `api/index.js`. La seule différence se trouve dans le commentaire de la fonction `formatTextForWord`.
+
 ```javascript
 const express = require('express');
 const cors = require('cors');
@@ -28,7 +42,7 @@ const containsArabic = (text) => {
 /**
  * Formate le texte pour docxtemplater en gérant les sauts de ligne et le texte de droite à gauche (RTL) pour l'arabe.
  * @param {string} text Le texte brut à formater.
- * @returns {string} Une chaîne XML prête à être insérée dans un champ raw (`{@...}`) de docxtemplater.
+ * @returns {string} Une chaîne XML prête à être insérée dans un champ raw ('@...') de docxtemplater.
  */
 const formatTextForWord = (text) => {
     // Si le texte est vide, retourner une chaîne vide pour éviter les erreurs
@@ -107,9 +121,6 @@ app.post('/api/save-notes', async (req, res) => { const weekNumber = parseInt(re
 app.post('/api/save-row', async (req, res) => { const weekNumber = parseInt(req.body.week, 10); const rowData = req.body.data; if (isNaN(weekNumber) || typeof rowData !== 'object') return res.status(400).json({ message: 'Données invalides.' }); try { const db = await connectToDatabase(); const updateFields = {}; const now = new Date(); for (const key in rowData) { updateFields[`data.$[elem].${key}`] = rowData[key]; } updateFields['data.$[elem].updatedAt'] = now; const arrayFilters = [{ "elem.Enseignant": rowData[findKey(rowData, 'Enseignant')], "elem.Classe": rowData[findKey(rowData, 'Classe')], "elem.Jour": rowData[findKey(rowData, 'Jour')], "elem.Période": rowData[findKey(rowData, 'Période')], "elem.Matière": rowData[findKey(rowData, 'Matière')] }]; const result = await db.collection('plans').updateOne({ week: weekNumber }, { $set: updateFields }, { arrayFilters: arrayFilters }); if (result.modifiedCount > 0 || result.matchedCount > 0) { res.status(200).json({ message: 'Ligne enregistrée.', updatedData: { updatedAt: now } }); } else { res.status(404).json({ message: 'Ligne non trouvée.' }); } } catch (error) { console.error('Erreur MongoDB /save-row:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 app.get('/api/all-classes', async (req, res) => { try { const db = await connectToDatabase(); const classes = await db.collection('plans').distinct('data.Classe', { 'data.Classe': { $ne: null, $ne: "" } }); res.status(200).json(classes.sort()); } catch (error) { console.error('Erreur MongoDB /api/all-classes:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 
-// ========================================================================
-// ========= ROUTE DE GÉNÉRATION WORD MISE À JOUR =========================
-// ========================================================================
 app.post('/api/generate-word', async (req, res) => {
     try {
         const { week, classe, data, notes } = req.body;
@@ -127,10 +138,9 @@ app.post('/api/generate-word', async (req, res) => {
         
         const zip = new PizZip(templateBuffer);
         
-        // MODIFIÉ ICI : Ajout de l'option `parser` pour la gestion du XML brut
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
-            linebreaks: true, // Gardé pour compatibilité, mais notre fonction gère mieux
+            linebreaks: true,
             nullGetter: () => "",
             parser: (tag) => {
                 if (tag.charAt(0) === '@') {
@@ -168,7 +178,6 @@ app.post('/api/generate-word', async (req, res) => {
             if (groupedByDay[dayName] && groupedByDay[dayName].length > 0) {
                 const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
                 
-                // MODIFIÉ ICI : Utilisation de la nouvelle fonction de formatage
                 const matieres = sortedEntries.map(item => ({
                     matiere: item[matiereKey] ?? "",
                     Lecon: formatTextForWord(item[leconKey] ?? ""),
@@ -190,7 +199,6 @@ app.post('/api/generate-word', async (req, res) => {
             }
         }
 
-        // MODIFIÉ ICI : Formatage des notes également
         const templateData = {
             classe: classe,
             semaine: weekNumber,
