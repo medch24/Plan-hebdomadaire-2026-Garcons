@@ -45,13 +45,11 @@ const formatTextForWord = (text) => {
     }).join('');
 };
 
-// *** CORRECTION N°1 : Ajout de la fonction parser pour Docxtemplater ***
-// Cette fonction indique à docxtemplater comment traiter les balises {@...}
 const xmlParser = (tag) => {
     if (tag.startsWith('@')) {
         return { type: "raw", value: tag.slice(1) };
     }
-    return null; // Pour les autres balises, utiliser le parser par défaut
+    return null;
 };
 
 
@@ -71,7 +69,7 @@ if (!MONGO_URL) console.error('FATAL: MONGO_URL n\'est pas définie.');
 
 if (process.env.GEMINI_API_KEY) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    // *** CORRECTION N°2 : Utilisation du modèle gemini-1.0-pro, stable et garanti ***
+    // Le modèle stable et correct qui fonctionnera après la mise à jour du package.json
     geminiModel = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
     console.log('✅ SDK Google Gemini initialisé avec le modèle gemini-1.0-pro.');
 } else {
@@ -134,7 +132,6 @@ app.post('/api/generate-word', async (req, res) => {
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
             nullGetter: () => "",
-            // *** CORRECTION N°1 : Le parser est passé ici ***
             parser: xmlParser,
         });
 
