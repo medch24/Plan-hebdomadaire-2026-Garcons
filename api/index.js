@@ -151,6 +151,7 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
         
         let formattedDate = "";
+        const weekNumber = Number(week); // Assurez-vous que week est un nombre pour la recherche
         const datesNode = specificWeekDateRangesNode[weekNumber];
         if (jour && datesNode?.start) {
             const weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
@@ -217,15 +218,6 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             return res.status(500).json({ message: "L'IA a retourné une réponse mal formée." });
         }
 
-        let templateBuffer;
-        try {
-            const response = await fetch(LESSON_TEMPLATE_URL);
-            if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
-            templateBuffer = Buffer.from(await response.arrayBuffer());
-        } catch (e) {
-            return res.status(500).json({ message: `Erreur récup modèle Word de plan de leçon.` });
-        }
-
         const zip = new PizZip(templateBuffer);
         const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
 
@@ -280,4 +272,3 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
 
 
 module.exports = app;
-
