@@ -21,18 +21,17 @@ const xmlEscape = (str) => {
 
 const containsArabic = (text) => {
     if (typeof text !== 'string') return false;
-    // Utilise une plage Unicode spécifique à l'arabe pour une détection plus précise
     const arabicRegex = /[\u0600-\u06FF]/;
     return arabicRegex.test(text);
 };
 
 /**
- * Formate le texte pour l'injection XML dans docxtemplater.
- * Gère les sauts de ligne, la direction du texte (RTL pour l'arabe) et l'alignement des paragraphes.
+ * Fonction améliorée pour formater le texte pour Word.
+ * Gère les sauts de ligne, l'alignement à droite et la direction RTL pour l'arabe.
  */
 const formatTextForWord = (text) => {
     if (!text || typeof text !== 'string' || text.trim() === '') {
-        return '<w:p/>'; // Retourne un paragraphe vide pour la compatibilité
+        return '<w:p/>';
     }
 
     const lines = text.split(/\r\n|\n|\r/);
@@ -40,20 +39,20 @@ const formatTextForWord = (text) => {
     return lines.map(line => {
         const escapedLine = xmlEscape(line);
         let paragraphProperties = '';
-        let runProperties = '';
 
         if (containsArabic(line)) {
-            // Pour l'arabe : aligner le paragraphe à droite et définir le texte comme RTL
-            paragraphProperties = '<w:pPr><w:jc w:val="right"/></w:pPr>';
-            runProperties = '<w:rPr><w:rtl/></w:rPr>';
+            // Applique les propriétés au niveau du paragraphe :
+            // 1. <w:jc w:val="right"/> -> Aligne le paragraphe à droite.
+            // 2. <w:rPr><w:rtl/></w:rPr> -> Définit les propriétés de texte par défaut du paragraphe en RTL.
+            paragraphProperties = '<w:pPr><w:jc w:val="right"/><w:rPr><w:rtl/></w:rPr></w:pPr>';
         }
 
         if (escapedLine.trim() === '') {
-            return '<w:p/>'; // Simule un saut de ligne avec un paragraphe vide
+            return '<w:p/>'; // Crée un paragraphe vide pour un saut de ligne.
         }
         
-        // Construit le paragraphe XML complet
-        return `<w:p>${paragraphProperties}<w:r>${runProperties}<w:t xml:space="preserve">${escapedLine}</w:t></w:r></w:p>`;
+        // Le texte est inséré dans une balise <w:t>. La direction est gérée par les propriétés du paragraphe.
+        return `<w:p>${paragraphProperties}<w:r><w:t xml:space="preserve">${escapedLine}</w:t></w:r></w:p>`;
     }).join('');
 };
 
@@ -73,7 +72,7 @@ if (!MONGO_URL) console.error('FATAL: MONGO_URL n\'est pas définie.');
 
 if (process.env.GEMINI_API_KEY) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    // *** CORRECTION APPLIQUÉE ICI : Utilisation du modèle gemini-pro ***
+    // *** CORRECTION DÉFINITIVE ICI : Utilisation du modèle gemini-pro ***
     geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
     console.log('✅ SDK Google Gemini initialisé avec le modèle gemini-pro.');
 } else {
