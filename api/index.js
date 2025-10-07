@@ -21,34 +21,30 @@ const xmlEscape = (str) => {
 
 const containsArabic = (text) => {
     if (typeof text !== 'string') return false;
-    const arabicRegex = /[\u0000-\u007F]/; // Cherche si il y a des caractères NON arabes/latins
-    // Simple test to check if the text contains non-latin characters, assuming it's arabic
-    return !arabicRegex.test(text.replace(/\s/g, ''));
+    // Cette regex est simple et suppose que si des caractères non-ASCII sont présents, c'est de l'arabe.
+    const nonAsciiRegex = /[^\u0000-\u007F]/;
+    return nonAsciiRegex.test(text);
 };
 
 const formatTextForWord = (text) => {
     if (!text || typeof text !== 'string' || text.trim() === '') {
+        // Retourne un paragraphe vide pour éviter les erreurs dans docxtemplater
         return '<w:p/>';
     }
 
     const lines = text.split(/\r\n|\n|\r/);
     
-    // Génère une "run" (<w:r>) pour chaque ligne. C'est plus robuste que de tout mettre dans un seul <w:t>.
-    const runs = lines.map(line => {
+    // Crée une structure XML Word où chaque ligne de texte est dans son propre paragraphe (<w:p>)
+    // C'est plus robuste pour la mise en forme que d'utiliser des <w:br/>
+    return lines.map(line => {
         const escapedLine = xmlEscape(line);
-        // Les lignes vides sont transformées en <w:br/>, sauf la première.
-        if (escapedLine === '') {
-            return '<w:br/>';
+        const paragraphProperties = containsArabic(line) ? '<w:pPr><w:rPr><w:rtl/></w:rPr></w:pPr>' : '';
+        // Si la ligne est vide, on crée quand même un paragraphe pour simuler le saut de ligne.
+        if (escapedLine.trim() === '') {
+            return '<w:p/>';
         }
-        // Pour l'arabe, on applique la propriété RTL sur la "run" de texte.
-        if (containsArabic(line)) {
-            return `<w:r><w:rPr><w:rtl/></w:rPr><w:t xml:space="preserve">${escapedLine}</w:t></w:r>`;
-        }
-        return `<w:r><w:t xml:space="preserve">${escapedLine}</w:t></w:r>`;
+        return `<w:p>${paragraphProperties}<w:r><w:t>${escapedLine}</w:t></w:r></w:p>`;
     }).join('');
-
-    // Les "runs" sont placées à l'intérieur d'un seul paragraphe <w:p>
-    return `<w:p>${runs}</w:p>`;
 };
 
 
@@ -106,21 +102,129 @@ app.post('/api/save-plan', async (req, res) => { const weekNumber = parseInt(req
 app.post('/api/save-notes', async (req, res) => { const weekNumber = parseInt(req.body.week, 10); const { classe, notes } = req.body; if (isNaN(weekNumber) || !classe) return res.status(400).json({ message: 'Données invalides.' }); try { const db = await connectToDatabase(); await db.collection('plans').updateOne({ week: weekNumber }, { $set: { [`classNotes.${classe}`]: notes } }, { upsert: true }); res.status(200).json({ message: 'Notes enregistrées.' }); } catch (error) { console.error('Erreur MongoDB /save-notes:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 app.post('/api/save-row', async (req, res) => { const weekNumber = parseInt(req.body.week, 10); const rowData = req.body.data; if (isNaN(weekNumber) || typeof rowData !== 'object') return res.status(400).json({ message: 'Données invalides.' }); try { const db = await connectToDatabase(); const updateFields = {}; const now = new Date(); for (const key in rowData) { updateFields[`data.$[elem].${key}`] = rowData[key]; } updateFields['data.$[elem].updatedAt'] = now; const arrayFilters = [{ "elem.Enseignant": rowData[findKey(rowData, 'Enseignant')], "elem.Classe": rowData[findKey(rowData, 'Classe')], "elem.Jour": rowData[findKey(rowData, 'Jour')], "elem.Période": rowData[findKey(rowData, 'Période')], "elem.Matière": rowData[findKey(rowData, 'Matière')] }]; const result = await db.collection('plans').updateOne({ week: weekNumber }, { $set: updateFields }, { arrayFilters: arrayFilters }); if (result.modifiedCount > 0 || result.matchedCount > 0) { res.status(200).json({ message: 'Ligne enregistrée.', updatedData: { updatedAt: now } }); } else { res.status(404).json({ message: 'Ligne non trouvée.' }); } } catch (error) { console.error('Erreur MongoDB /save-row:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 app.get('/api/all-classes', async (req, res) => { try { const db = await connectToDatabase(); const classes = await db.collection('plans').distinct('data.Classe', { 'data.Classe': { $ne: null, $ne: "" } }); res.status(200).json(classes.sort()); } catch (error) { console.error('Erreur MongoDB /api/all-classes:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
-app.post('/api/generate-word', async (req, res) => { try { const { week, classe, data, notes } = req.body; const weekNumber = Number(week); if (!Number.isInteger(weekNumber) || !classe || !Array.isArray(data)) return res.status(400).json({ message: 'Données invalides.' }); let templateBuffer; try { const response = await fetch(WORD_TEMPLATE_URL); if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`); templateBuffer = Buffer.from(await response.arrayBuffer()); } catch (e) { return res.status(500).json({ message: `Erreur récup modèle Word.` }); } const zip = new PizZip(templateBuffer); const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" }); const groupedByDay = {}; const dayOrder = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"]; const datesNode = specificWeekDateRangesNode[weekNumber]; let weekStartDateNode = null; if (datesNode?.start) weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z'); if (!weekStartDateNode || isNaN(weekStartDateNode.getTime())) return res.status(500).json({ message: `Dates serveur manquantes pour S${weekNumber}.` }); const sampleRow = data[0] || {}; const jourKey = findKey(sampleRow, 'Jour'), periodeKey = findKey(sampleRow, 'Période'), matiereKey = findKey(sampleRow, 'Matière'), leconKey = findKey(sampleRow, 'Leçon'), travauxKey = findKey(sampleRow, 'Travaux de classe'), supportKey = findKey(sampleRow, 'Support'), devoirsKey = findKey(sampleRow, 'Devoirs'); data.forEach(item => { const day = item[jourKey]; if (day && dayOrder.includes(day)) { if (!groupedByDay[day]) groupedByDay[day] = []; groupedByDay[day].push(item); } }); const joursData = dayOrder.map(dayName => { if (!groupedByDay[dayName]) return null; const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName); const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName; const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0)); const matieres = sortedEntries.map(item => ({ matiere: item[matiereKey] ?? "", Lecon: item[leconKey] ?? "", travailDeClasse: item[travauxKey] ?? "", Support: item[supportKey] ?? "", devoirs: item[devoirsKey] ?? "" })); return { jourDateComplete: formattedDate, matieres: matieres }; }).filter(Boolean); let plageSemaineText = `Semaine ${weekNumber}`; if (datesNode?.start && datesNode?.end) { const startD = new Date(datesNode.start + 'T00:00:00Z'), endD = new Date(datesNode.end + 'T00:00:00Z'); if (!isNaN(startD.getTime()) && !isNaN(endD.getTime())) { plageSemaineText = `du ${formatDateFrenchNode(startD)} à ${formatDateFrenchNode(endD)}`; } } const templateData = { semaine: weekNumber, classe: classe, jours: joursData, notes: (notes || ""), plageSemaine: plageSemaineText }; doc.render(templateData); const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' }); const filename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`; res.setHeader('Content-Disposition', `attachment; filename="${filename}"`); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'); res.send(buf); } catch (error) { console.error('❌ Erreur serveur /generate-word:', error); if (!res.headersSent) res.status(500).json({ message: 'Erreur interne /generate-word.' }); } });
+
+// ========================================================================
+// =========           GÉNÉRATION DU DOCUMENT WORD              ===========
+// ========================================================================
+app.post('/api/generate-word', async (req, res) => {
+    try {
+        const { week, classe, data, notes } = req.body;
+        const weekNumber = Number(week);
+        if (!Number.isInteger(weekNumber) || !classe || !Array.isArray(data)) {
+            return res.status(400).json({ message: 'Données invalides.' });
+        }
+        
+        let templateBuffer;
+        try {
+            const response = await fetch(WORD_TEMPLATE_URL);
+            if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
+            templateBuffer = Buffer.from(await response.arrayBuffer());
+        } catch (e) {
+            console.error("Erreur de récupération du modèle Word:", e);
+            return res.status(500).json({ message: `Erreur récup modèle Word.` });
+        }
+        
+        const zip = new PizZip(templateBuffer);
+        // L'option `parser` est nécessaire pour interpréter correctement le XML formaté
+        const doc = new Docxtemplater(zip, {
+            paragraphLoop: true,
+            linebreaks: false, // Désactivé car notre fonction formatTextForWord gère les paragraphes
+            nullGetter: () => "",
+        });
+
+        const groupedByDay = {};
+        const dayOrder = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
+        const datesNode = specificWeekDateRangesNode[weekNumber];
+        let weekStartDateNode = null;
+        if (datesNode?.start) {
+            weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
+        }
+
+        if (!weekStartDateNode || isNaN(weekStartDateNode.getTime())) {
+            return res.status(500).json({ message: `Dates serveur manquantes pour S${weekNumber}.` });
+        }
+
+        const sampleRow = data[0] || {};
+        const jourKey = findKey(sampleRow, 'Jour'), periodeKey = findKey(sampleRow, 'Période'), matiereKey = findKey(sampleRow, 'Matière'), leconKey = findKey(sampleRow, 'Leçon'), travauxKey = findKey(sampleRow, 'Travaux de classe'), supportKey = findKey(sampleRow, 'Support'), devoirsKey = findKey(sampleRow, 'Devoirs');
+
+        data.forEach(item => {
+            const day = item[jourKey];
+            if (day && dayOrder.includes(day)) {
+                if (!groupedByDay[day]) groupedByDay[day] = [];
+                groupedByDay[day].push(item);
+            }
+        });
+
+        const joursData = dayOrder.map(dayName => {
+            if (!groupedByDay[dayName]) return null;
+
+            const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
+            const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
+            const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
+            
+            // *** CORRECTION APPLIQUÉE ICI ***
+            // On applique formatTextForWord sur les champs de texte
+            const matieres = sortedEntries.map(item => ({
+                matiere: item[matiereKey] ?? "",
+                Lecon: formatTextForWord(item[leconKey]),
+                travailDeClasse: formatTextForWord(item[travauxKey]),
+                Support: formatTextForWord(item[supportKey]),
+                devoirs: formatTextForWord(item[devoirsKey])
+            }));
+            
+            return { jourDateComplete: formattedDate, matieres: matieres };
+        }).filter(Boolean);
+
+        let plageSemaineText = `Semaine ${weekNumber}`;
+        if (datesNode?.start && datesNode?.end) {
+            const startD = new Date(datesNode.start + 'T00:00:00Z'), endD = new Date(datesNode.end + 'T00:00:00Z');
+            if (!isNaN(startD.getTime()) && !isNaN(endD.getTime())) {
+                plageSemaineText = `du ${formatDateFrenchNode(startD)} à ${formatDateFrenchNode(endD)}`;
+            }
+        }
+        
+        const templateData = {
+            semaine: weekNumber,
+            classe: classe,
+            jours: joursData,
+            // *** CORRECTION APPLIQUÉE ICI ***
+            notes: formatTextForWord(notes),
+            plageSemaine: plageSemaineText
+        };
+        
+        doc.render(templateData);
+        
+        const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+        const filename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`;
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.send(buf);
+
+    } catch (error) {
+        console.error('❌ Erreur serveur /generate-word:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ message: 'Erreur interne /generate-word.' });
+        }
+    }
+});
+
+
 app.post('/api/generate-excel-workbook', async (req, res) => { try { const weekNumber = Number(req.body.week); if (!Number.isInteger(weekNumber)) return res.status(400).json({ message: 'Semaine invalide.' }); const db = await connectToDatabase(); const planDocument = await db.collection('plans').findOne({ week: weekNumber }); if (!planDocument?.data?.length) return res.status(404).json({ message: `Aucune donnée pour S${weekNumber}.` }); const finalHeaders = [ 'Enseignant', 'Jour', 'Période', 'Classe', 'Matière', 'Leçon', 'Travaux de classe', 'Support', 'Devoirs' ]; const formattedData = planDocument.data.map(item => { const row = {}; finalHeaders.forEach(header => { const itemKey = findKey(item, header); row[header] = itemKey ? item[itemKey] : ''; }); return row; }); const workbook = XLSX.utils.book_new(); const worksheet = XLSX.utils.json_to_sheet(formattedData, { header: finalHeaders }); worksheet['!cols'] = [ { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 20 }, { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 45 } ]; XLSX.utils.book_append_sheet(workbook, worksheet, `Plan S${weekNumber}`); const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }); const filename = `Plan_Hebdomadaire_S${weekNumber}_Complet.xlsx`; res.setHeader('Content-Disposition', `attachment; filename="${filename}"`); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buffer); } catch (error) { console.error('❌ Erreur serveur /generate-excel-workbook:', error); if (!res.headersSent) res.status(500).json({ message: 'Erreur interne Excel.' }); } });
 app.post('/api/full-report-by-class', async (req, res) => { try { const { classe: requestedClass } = req.body; if (!requestedClass) return res.status(400).json({ message: 'Classe requise.' }); const db = await connectToDatabase(); const allPlans = await db.collection('plans').find({}).sort({ week: 1 }).toArray(); if (!allPlans || allPlans.length === 0) return res.status(404).json({ message: 'Aucune donnée.' }); const dataBySubject = {}; const monthsFrench = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]; allPlans.forEach(plan => { const weekNumber = plan.week; let monthName = 'N/A'; const weekDates = specificWeekDateRangesNode[weekNumber]; if (weekDates?.start) { try { const startDate = new Date(weekDates.start + 'T00:00:00Z'); monthName = monthsFrench[startDate.getUTCMonth()]; } catch (e) {} } (plan.data || []).forEach(item => { const itemClassKey = findKey(item, 'classe'); const itemSubjectKey = findKey(item, 'matière'); if (itemClassKey && item[itemClassKey] === requestedClass && itemSubjectKey && item[itemSubjectKey]) { const subject = item[itemSubjectKey]; if (!dataBySubject[subject]) dataBySubject[subject] = []; const row = { 'Mois': monthName, 'Semaine': weekNumber, 'Période': item[findKey(item, 'période')] || '', 'Leçon': item[findKey(item, 'leçon')] || '', 'Travaux de classe': item[findKey(item, 'travaux de classe')] || '', 'Support': item[findKey(item, 'support')] || '', 'Devoirs': item[findKey(item, 'devoirs')] || '' }; dataBySubject[subject].push(row); } }); }); const subjectsFound = Object.keys(dataBySubject); if (subjectsFound.length === 0) return res.status(404).json({ message: `Aucune donnée pour la classe '${requestedClass}'.` }); const workbook = XLSX.utils.book_new(); const headers = ['Mois', 'Semaine', 'Période', 'Leçon', 'Travaux de classe', 'Support', 'Devoirs']; subjectsFound.sort().forEach(subject => { const safeSheetName = subject.substring(0, 30).replace(/[*?:/\\\[\]]/g, '_'); const worksheet = XLSX.utils.json_to_sheet(dataBySubject[subject], { header: headers }); worksheet['!cols'] = [ { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 40 }, { wch: 40 }, { wch: 25 }, { wch: 40 } ]; XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName); }); const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }); const filename = `Rapport_Complet_${requestedClass.replace(/[^a-z0-9]/gi, '_')}.xlsx`; res.setHeader('Content-Disposition', `attachment; filename="${filename}"`); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buffer); } catch (error) { console.error('❌ Erreur serveur /full-report-by-class:', error); if (!res.headersSent) res.status(500).json({ message: 'Erreur interne du rapport.' }); } });
 
-// ===== FONCTION IA FINALE AVEC CLOUDFLARE ET MODÈLE WORD =====
+// ========================================================================
+// =========      GÉNÉRATION DU PLAN DE LEÇON PAR L'IA          ===========
+// ========================================================================
 app.post('/api/generate-ai-lesson-plan', async (req, res) => {
     try {
         // --- 1. Vérification des configurations ---
-        const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-        const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-        const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL;
-
-        if (!accountId || !apiToken) {
-            return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API du serveur." });
+        // *** CORRECTION APPLIQUÉE ICI ***
+        // On vérifie si le modèle Gemini est disponible, pas les clés Cloudflare
+        if (!geminiModel) {
+            return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });
         }
+        
+        const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL;
         if (!lessonTemplateUrl) {
             return res.status(503).json({ message: "L'URL du modèle de leçon Word n'est pas configurée." });
         }
@@ -140,6 +244,7 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             console.error("Erreur de récupération du modèle Word:", e);
             return res.status(500).json({ message: "Impossible de récupérer le modèle de leçon depuis l'URL fournie." });
         }
+        
         const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
         const classe = rowData[findKey(rowData, 'Classe')] || '';
         const matiere = rowData[findKey(rowData, 'Matière')] || '';
@@ -151,7 +256,7 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
         
         let formattedDate = "";
-        const weekNumber = Number(week); // Assurez-vous que week est un nombre pour la recherche
+        const weekNumber = Number(week);
         const datesNode = specificWeekDateRangesNode[weekNumber];
         if (jour && datesNode?.start) {
             const weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
