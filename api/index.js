@@ -21,32 +21,41 @@ const xmlEscape = (str) => {
 
 const containsArabic = (text) => {
     if (typeof text !== 'string') return false;
-    // Cette regex est simple et suppose que si des caractères non-ASCII sont présents, c'est de l'arabe.
-    const nonAsciiRegex = /[^\u0000-\u007F]/;
-    return nonAsciiRegex.test(text);
+    // Utilise une plage Unicode spécifique à l'arabe pour une détection plus précise
+    const arabicRegex = /[\u0600-\u06FF]/;
+    return arabicRegex.test(text);
 };
 
+/**
+ * Formate le texte pour l'injection XML dans docxtemplater.
+ * Gère les sauts de ligne, la direction du texte (RTL pour l'arabe) et l'alignement des paragraphes.
+ */
 const formatTextForWord = (text) => {
     if (!text || typeof text !== 'string' || text.trim() === '') {
-        // Retourne un paragraphe vide pour éviter les erreurs dans docxtemplater
-        return '<w:p/>';
+        return '<w:p/>'; // Retourne un paragraphe vide pour la compatibilité
     }
 
     const lines = text.split(/\r\n|\n|\r/);
-    
-    // Crée une structure XML Word où chaque ligne de texte est dans son propre paragraphe (<w:p>)
-    // C'est plus robuste pour la mise en forme que d'utiliser des <w:br/>
+
     return lines.map(line => {
         const escapedLine = xmlEscape(line);
-        const paragraphProperties = containsArabic(line) ? '<w:pPr><w:rPr><w:rtl/></w:rPr></w:pPr>' : '';
-        // Si la ligne est vide, on crée quand même un paragraphe pour simuler le saut de ligne.
-        if (escapedLine.trim() === '') {
-            return '<w:p/>';
+        let paragraphProperties = '';
+        let runProperties = '';
+
+        if (containsArabic(line)) {
+            // Pour l'arabe : aligner le paragraphe à droite et définir le texte comme RTL
+            paragraphProperties = '<w:pPr><w:jc w:val="right"/></w:pPr>';
+            runProperties = '<w:rPr><w:rtl/></w:rPr>';
         }
-        return `<w:p>${paragraphProperties}<w:r><w:t>${escapedLine}</w:t></w:r></w:p>`;
+
+        if (escapedLine.trim() === '') {
+            return '<w:p/>'; // Simule un saut de ligne avec un paragraphe vide
+        }
+        
+        // Construit le paragraphe XML complet
+        return `<w:p>${paragraphProperties}<w:r>${runProperties}<w:t xml:space="preserve">${escapedLine}</w:t></w:r></w:p>`;
     }).join('');
 };
-
 
 const app = express();
 
@@ -61,10 +70,12 @@ const LESSON_TEMPLATE_URL = process.env.LESSON_TEMPLATE_URL;
 let geminiModel;
 
 if (!MONGO_URL) console.error('FATAL: MONGO_URL n\'est pas définie.');
+
 if (process.env.GEMINI_API_KEY) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    console.log('✅ SDK Google Gemini initialisé.');
+    // *** CORRECTION APPLIQUÉE ICI : Utilisation du modèle gemini-pro ***
+    geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
+    console.log('✅ SDK Google Gemini initialisé avec le modèle gemini-pro.');
 } else {
     console.warn('⚠️ GEMINI_API_KEY non défini. La fonctionnalité IA sera désactivée.');
 }
@@ -103,9 +114,6 @@ app.post('/api/save-notes', async (req, res) => { const weekNumber = parseInt(re
 app.post('/api/save-row', async (req, res) => { const weekNumber = parseInt(req.body.week, 10); const rowData = req.body.data; if (isNaN(weekNumber) || typeof rowData !== 'object') return res.status(400).json({ message: 'Données invalides.' }); try { const db = await connectToDatabase(); const updateFields = {}; const now = new Date(); for (const key in rowData) { updateFields[`data.$[elem].${key}`] = rowData[key]; } updateFields['data.$[elem].updatedAt'] = now; const arrayFilters = [{ "elem.Enseignant": rowData[findKey(rowData, 'Enseignant')], "elem.Classe": rowData[findKey(rowData, 'Classe')], "elem.Jour": rowData[findKey(rowData, 'Jour')], "elem.Période": rowData[findKey(rowData, 'Période')], "elem.Matière": rowData[findKey(rowData, 'Matière')] }]; const result = await db.collection('plans').updateOne({ week: weekNumber }, { $set: updateFields }, { arrayFilters: arrayFilters }); if (result.modifiedCount > 0 || result.matchedCount > 0) { res.status(200).json({ message: 'Ligne enregistrée.', updatedData: { updatedAt: now } }); } else { res.status(404).json({ message: 'Ligne non trouvée.' }); } } catch (error) { console.error('Erreur MongoDB /save-row:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 app.get('/api/all-classes', async (req, res) => { try { const db = await connectToDatabase(); const classes = await db.collection('plans').distinct('data.Classe', { 'data.Classe': { $ne: null, $ne: "" } }); res.status(200).json(classes.sort()); } catch (error) { console.error('Erreur MongoDB /api/all-classes:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 
-// ========================================================================
-// =========           GÉNÉRATION DU DOCUMENT WORD              ===========
-// ========================================================================
 app.post('/api/generate-word', async (req, res) => {
     try {
         const { week, classe, data, notes } = req.body;
@@ -125,10 +133,8 @@ app.post('/api/generate-word', async (req, res) => {
         }
         
         const zip = new PizZip(templateBuffer);
-        // L'option `parser` est nécessaire pour interpréter correctement le XML formaté
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
-            linebreaks: false, // Désactivé car notre fonction formatTextForWord gère les paragraphes
             nullGetter: () => "",
         });
 
@@ -162,8 +168,6 @@ app.post('/api/generate-word', async (req, res) => {
             const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
             const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
             
-            // *** CORRECTION APPLIQUÉE ICI ***
-            // On applique formatTextForWord sur les champs de texte
             const matieres = sortedEntries.map(item => ({
                 matiere: item[matiereKey] ?? "",
                 Lecon: formatTextForWord(item[leconKey]),
@@ -187,7 +191,6 @@ app.post('/api/generate-word', async (req, res) => {
             semaine: weekNumber,
             classe: classe,
             jours: joursData,
-            // *** CORRECTION APPLIQUÉE ICI ***
             notes: formatTextForWord(notes),
             plageSemaine: plageSemaineText
         };
@@ -208,18 +211,11 @@ app.post('/api/generate-word', async (req, res) => {
     }
 });
 
-
 app.post('/api/generate-excel-workbook', async (req, res) => { try { const weekNumber = Number(req.body.week); if (!Number.isInteger(weekNumber)) return res.status(400).json({ message: 'Semaine invalide.' }); const db = await connectToDatabase(); const planDocument = await db.collection('plans').findOne({ week: weekNumber }); if (!planDocument?.data?.length) return res.status(404).json({ message: `Aucune donnée pour S${weekNumber}.` }); const finalHeaders = [ 'Enseignant', 'Jour', 'Période', 'Classe', 'Matière', 'Leçon', 'Travaux de classe', 'Support', 'Devoirs' ]; const formattedData = planDocument.data.map(item => { const row = {}; finalHeaders.forEach(header => { const itemKey = findKey(item, header); row[header] = itemKey ? item[itemKey] : ''; }); return row; }); const workbook = XLSX.utils.book_new(); const worksheet = XLSX.utils.json_to_sheet(formattedData, { header: finalHeaders }); worksheet['!cols'] = [ { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 20 }, { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 45 } ]; XLSX.utils.book_append_sheet(workbook, worksheet, `Plan S${weekNumber}`); const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }); const filename = `Plan_Hebdomadaire_S${weekNumber}_Complet.xlsx`; res.setHeader('Content-Disposition', `attachment; filename="${filename}"`); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buffer); } catch (error) { console.error('❌ Erreur serveur /generate-excel-workbook:', error); if (!res.headersSent) res.status(500).json({ message: 'Erreur interne Excel.' }); } });
 app.post('/api/full-report-by-class', async (req, res) => { try { const { classe: requestedClass } = req.body; if (!requestedClass) return res.status(400).json({ message: 'Classe requise.' }); const db = await connectToDatabase(); const allPlans = await db.collection('plans').find({}).sort({ week: 1 }).toArray(); if (!allPlans || allPlans.length === 0) return res.status(404).json({ message: 'Aucune donnée.' }); const dataBySubject = {}; const monthsFrench = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]; allPlans.forEach(plan => { const weekNumber = plan.week; let monthName = 'N/A'; const weekDates = specificWeekDateRangesNode[weekNumber]; if (weekDates?.start) { try { const startDate = new Date(weekDates.start + 'T00:00:00Z'); monthName = monthsFrench[startDate.getUTCMonth()]; } catch (e) {} } (plan.data || []).forEach(item => { const itemClassKey = findKey(item, 'classe'); const itemSubjectKey = findKey(item, 'matière'); if (itemClassKey && item[itemClassKey] === requestedClass && itemSubjectKey && item[itemSubjectKey]) { const subject = item[itemSubjectKey]; if (!dataBySubject[subject]) dataBySubject[subject] = []; const row = { 'Mois': monthName, 'Semaine': weekNumber, 'Période': item[findKey(item, 'période')] || '', 'Leçon': item[findKey(item, 'leçon')] || '', 'Travaux de classe': item[findKey(item, 'travaux de classe')] || '', 'Support': item[findKey(item, 'support')] || '', 'Devoirs': item[findKey(item, 'devoirs')] || '' }; dataBySubject[subject].push(row); } }); }); const subjectsFound = Object.keys(dataBySubject); if (subjectsFound.length === 0) return res.status(404).json({ message: `Aucune donnée pour la classe '${requestedClass}'.` }); const workbook = XLSX.utils.book_new(); const headers = ['Mois', 'Semaine', 'Période', 'Leçon', 'Travaux de classe', 'Support', 'Devoirs']; subjectsFound.sort().forEach(subject => { const safeSheetName = subject.substring(0, 30).replace(/[*?:/\\\[\]]/g, '_'); const worksheet = XLSX.utils.json_to_sheet(dataBySubject[subject], { header: headers }); worksheet['!cols'] = [ { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 40 }, { wch: 40 }, { wch: 25 }, { wch: 40 } ]; XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName); }); const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }); const filename = `Rapport_Complet_${requestedClass.replace(/[^a-z0-9]/gi, '_')}.xlsx`; res.setHeader('Content-Disposition', `attachment; filename="${filename}"`); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buffer); } catch (error) { console.error('❌ Erreur serveur /full-report-by-class:', error); if (!res.headersSent) res.status(500).json({ message: 'Erreur interne du rapport.' }); } });
 
-// ========================================================================
-// =========      GÉNÉRATION DU PLAN DE LEÇON PAR L'IA          ===========
-// ========================================================================
 app.post('/api/generate-ai-lesson-plan', async (req, res) => {
     try {
-        // --- 1. Vérification des configurations ---
-        // *** CORRECTION APPLIQUÉE ICI ***
-        // On vérifie si le modèle Gemini est disponible, pas les clés Cloudflare
         if (!geminiModel) {
             return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });
         }
@@ -234,7 +230,6 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             return res.status(400).json({ message: "Les données de la ligne ou de la semaine sont manquantes." });
         }
 
-        // --- 2. Récupération du modèle Word ---
         let templateBuffer;
         try {
             const response = await fetch(lessonTemplateUrl);
