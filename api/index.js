@@ -25,36 +25,33 @@ const containsArabic = (text) => {
     return arabicRegex.test(text);
 };
 
-/**
- * Fonction DÉFINITIVE pour formater le texte pour Word.
- * Gère les sauts de ligne, l'alignement à droite et la direction RTL pour l'arabe.
- */
 const formatTextForWord = (text) => {
     if (!text || typeof text !== 'string' || text.trim() === '') {
-        return '<w:p/>'; // Retourne un paragraphe vide pour éviter les erreurs.
+        return '<w:p/>';
     }
-
     const lines = text.split(/\r\n|\n|\r/);
-
     return lines.map(line => {
         const escapedLine = xmlEscape(line);
         let paragraphProperties = '';
         let runProperties = '';
-
         if (containsArabic(line)) {
-            // Propriété pour le paragraphe : alignement à droite
             paragraphProperties = '<w:pPr><w:jc w:val="right"/></w:pPr>';
-            // Propriété pour le bloc de texte : direction RTL
             runProperties = '<w:rPr><w:rtl/></w:rPr>';
         }
-
         if (escapedLine.trim() === '') {
-            return '<w:p/>'; // Crée un paragraphe vide pour simuler un saut de ligne.
+            return '<w:p/>';
         }
-        
-        // Construit la structure XML correcte, en séparant les propriétés du paragraphe et du texte.
         return `<w:p>${paragraphProperties}<w:r>${runProperties}<w:t xml:space="preserve">${escapedLine}</w:t></w:r></w:p>`;
     }).join('');
+};
+
+// *** CORRECTION N°1 : Ajout de la fonction parser pour Docxtemplater ***
+// Cette fonction indique à docxtemplater comment traiter les balises {@...}
+const xmlParser = (tag) => {
+    if (tag.startsWith('@')) {
+        return { type: "raw", value: tag.slice(1) };
+    }
+    return null; // Pour les autres balises, utiliser le parser par défaut
 };
 
 
@@ -74,9 +71,9 @@ if (!MONGO_URL) console.error('FATAL: MONGO_URL n\'est pas définie.');
 
 if (process.env.GEMINI_API_KEY) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    // *** CORRECTION DÉFINITIVE ICI : Le modèle doit être "gemini-pro" ***
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
-    console.log('✅ SDK Google Gemini initialisé avec le modèle gemini-pro.');
+    // *** CORRECTION N°2 : Utilisation du modèle gemini-1.0-pro, stable et garanti ***
+    geminiModel = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+    console.log('✅ SDK Google Gemini initialisé avec le modèle gemini-1.0-pro.');
 } else {
     console.warn('⚠️ GEMINI_API_KEY non défini. La fonctionnalité IA sera désactivée.');
 }
@@ -137,6 +134,8 @@ app.post('/api/generate-word', async (req, res) => {
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
             nullGetter: () => "",
+            // *** CORRECTION N°1 : Le parser est passé ici ***
+            parser: xmlParser,
         });
 
         const groupedByDay = {};
