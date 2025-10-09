@@ -1,4 +1,3 @@
-javascript
 const express = require('express');
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
@@ -8,6 +7,7 @@ const Docxtemplater = require('docxtemplater');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
+const { wordParser } = require("docxtemplater/expressions.js");
 
 // ========================================================================
 // ========= FONCTIONS D'AIDE POUR LA GÉNÉRATION WORD (FINALES AMÉLIORÉES) ==========
@@ -36,55 +36,33 @@ const containsArabic = (text) => {
  * @returns {string} La chaîne XML WordprocessingML formatée.
  */
 const formatTextForWord = (text, options = {}) => {
-    // Si le texte est vide ou non défini, retourne un paragraphe vide pour conserver l'espacement.
     if (!text || typeof text !== 'string' || text.trim() === '') {
         return '<w:p/>';
     }
-
     const { color, italic } = options;
-    // Sépare le texte en lignes pour traiter chaque saut de ligne individuellement.
     const lines = text.split(/\r\n|\n|\r/);
-
     return lines.map(line => {
-        // Pour chaque saut de ligne intentionnel (ligne vide), créer un paragraphe Word vide.
-        // C'est la clé pour respecter les espacements verticaux.
         if (line.trim() === '') {
             return '<w:p/>';
         }
-
         const escapedLine = xmlEscape(line);
         let paragraphProperties = '';
         const runPropertiesParts = [];
-        
-        // Conserve la taille de la police par défaut du template (11pt, soit 22 half-points)
         runPropertiesParts.push('<w:sz w:val="22"/><w:szCs w:val="22"/>');
-
-        // Ajoute la balise de couleur si une couleur est spécifiée.
         if (color) {
             runPropertiesParts.push(`<w:color w:val="${color}"/>`);
         }
-        // Ajoute la balise italique si demandée.
         if (italic) {
-            // <w:i/> pour les polices standards, <w:iCs/> pour les polices de scripts complexes (Arabe etc.)
             runPropertiesParts.push('<w:i/><w:iCs w:val="true"/>');
         }
-
-        // Gérer le texte en arabe : alignement à droite et direction RTL.
         if (containsArabic(line)) {
             paragraphProperties = '<w:pPr><w:jc w:val="right"/></w:pPr>';
             runPropertiesParts.push('<w:rtl/>');
         }
-        
-        const runProperties = runPropertiesParts.length > 0 
-            ? `<w:rPr>${runPropertiesParts.join('')}</w:rPr>` 
-            : '';
-        
-        // Construit la structure XML finale pour cette ligne de texte.
-        // xml:space="preserve" est crucial pour garder les espaces multiples au sein d'une ligne.
+        const runProperties = runPropertiesParts.length > 0 ? `<w:rPr>${runPropertiesParts.join('')}</w:rPr>` : '';
         return `<w:p>${paragraphProperties}<w:r>${runProperties}<w:t xml:space="preserve">${escapedLine}</w:t></w:r></w:p>`;
     }).join('');
 };
-
 
 const app = express();
 
@@ -102,7 +80,6 @@ if (!MONGO_URL) console.error('FATAL: MONGO_URL n\'est pas définie.');
 
 if (process.env.GEMINI_API_KEY) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    // *** CORRECTION DÉFINITIVE ICI : Le modèle doit être "gemini-pro" ***
     geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
     console.log('✅ SDK Google Gemini initialisé avec le modèle gemini-pro.');
 } else {
@@ -136,7 +113,25 @@ function formatDateFrenchNode(date) { if (!date || isNaN(date.getTime())) return
 function getDateForDayNameNode(weekStartDate, dayName) { if (!weekStartDate || isNaN(weekStartDate.getTime())) return null; const dayOrder = { "Dimanche": 0, "Lundi": 1, "Mardi": 2, "Mercredi": 3, "Jeudi": 4 }; const offset = dayOrder[dayName]; if (offset === undefined) return null; const specificDate = new Date(Date.UTC(weekStartDate.getUTCFullYear(), weekStartDate.getUTCMonth(), weekStartDate.getUTCDate())); specificDate.setUTCDate(specificDate.getUTCDate() + offset); return specificDate; }
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
 
-app.post('/api/login', (req, res) => { const { username, password } = req.body; if (validUsers[username] && validUsers[username] === password) { res.status(200).json({ success: true, username: username }); } else { res.status(401).json({ success: false, message: 'Identifiants invalides' }); } });
+// ### MODIFICATION 2 : Route de connexion rendue plus robuste ###
+app.post('/api/login', (req, res) => {
+    try {
+        if (!req.body) {
+            console.error('Login Error: req.body is undefined!');
+            return res.status(400).json({ success: false, message: 'Requête invalide.' });
+        }
+        const { username, password } = req.body;
+        if (validUsers[username] && validUsers[username] === password) {
+            res.status(200).json({ success: true, username: username });
+        } else {
+            res.status(401).json({ success: false, message: 'Identifiants invalides' });
+        }
+    } catch (error) {
+        console.error('CRASH in /api/login:', error);
+        res.status(500).json({ success: false, message: 'Erreur interne du serveur.' });
+    }
+});
+
 app.get('/api/plans/:week', async (req, res) => { const weekNumber = parseInt(req.params.week, 10); if (isNaN(weekNumber)) return res.status(400).json({ message: 'Semaine invalide.' }); try { const db = await connectToDatabase(); const planDocument = await db.collection('plans').findOne({ week: weekNumber }); if (planDocument) { res.status(200).json({ planData: planDocument.data || [], classNotes: planDocument.classNotes || {} }); } else { res.status(200).json({ planData: [], classNotes: {} }); } } catch (error) { console.error('Erreur MongoDB /plans/:week:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 app.post('/api/save-plan', async (req, res) => { const weekNumber = parseInt(req.body.week, 10); const data = req.body.data; if (isNaN(weekNumber) || !Array.isArray(data)) return res.status(400).json({ message: 'Données invalides.' }); try { const db = await connectToDatabase(); await db.collection('plans').updateOne({ week: weekNumber }, { $set: { data: data } }, { upsert: true }); res.status(200).json({ message: `Plan S${weekNumber} enregistré.` }); } catch (error) { console.error('Erreur MongoDB /save-plan:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
 app.post('/api/save-notes', async (req, res) => { const weekNumber = parseInt(req.body.week, 10); const { classe, notes } = req.body; if (isNaN(weekNumber) || !classe) return res.status(400).json({ message: 'Données invalides.' }); try { const db = await connectToDatabase(); await db.collection('plans').updateOne({ week: weekNumber }, { $set: { [`classNotes.${classe}`]: notes } }, { upsert: true }); res.status(200).json({ message: 'Notes enregistrées.' }); } catch (error) { console.error('Erreur MongoDB /save-notes:', error); res.status(500).json({ message: 'Erreur serveur.' }); } });
@@ -162,10 +157,22 @@ app.post('/api/generate-word', async (req, res) => {
         }
         
         const zip = new PizZip(templateBuffer);
+
+        // ### MODIFICATION 1 : Configuration du parser pour le XML ###
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
-            linebreaks: true, // Important pour que docxtemplater gère les sauts de ligne XML
             nullGetter: () => "",
+            parser: (tag) => {
+                // Si le tag commence par '@', on le traite comme du XML brut
+                if (tag.startsWith("@")) {
+                    return {
+                        get: (scope) => scope[tag.slice(1)],
+                        raw: true,
+                    };
+                }
+                // Sinon, on utilise le parser par défaut
+                return wordParser(tag);
+            },
         });
 
         const groupedByDay = {};
@@ -193,19 +200,16 @@ app.post('/api/generate-word', async (req, res) => {
 
         const joursData = dayOrder.map(dayName => {
             if (!groupedByDay[dayName]) return null;
-
             const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
             const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
             const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
-            
             const matieres = sortedEntries.map(item => ({
                 matiere: item[matiereKey] ?? "",
                 Lecon: formatTextForWord(item[leconKey], { color: 'FF0000' }),
-                travailDeClasse: formatTextForWord(item[travauxKey]), // Style par défaut
+                travailDeClasse: formatTextForWord(item[travauxKey]),
                 Support: formatTextForWord(item[supportKey], { italic: true }),
-                devoirs: formatTextForWord(item[devoirsKey]) // Style par défaut
+                devoirs: formatTextForWord(item[devoirsKey])
             }));
-            
             return { jourDateComplete: formattedDate, matieres: matieres };
         }).filter(Boolean);
 
@@ -225,15 +229,7 @@ app.post('/api/generate-word', async (req, res) => {
             plageSemaine: plageSemaineText
         };
         
-        // Indiquer à docxtemplater que les champs formatés sont du XML brut
-        doc.setData(templateData);
-        
-        try {
-            doc.render();
-        } catch (error) {
-            console.error("Erreur de rendu Docxtemplater:", error);
-            throw error;
-        }
+        doc.render(templateData);
         
         const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
         const filename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`;
@@ -257,17 +253,14 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         if (!geminiModel) {
             return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });
         }
-        
         const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL;
         if (!lessonTemplateUrl) {
             return res.status(503).json({ message: "L'URL du modèle de leçon Word n'est pas configurée." });
         }
-
         const { week, rowData } = req.body;
         if (!rowData || typeof rowData !== 'object' || !week) {
             return res.status(400).json({ message: "Les données de la ligne ou de la semaine sont manquantes." });
         }
-
         let templateBuffer;
         try {
             const response = await fetch(lessonTemplateUrl);
@@ -277,7 +270,6 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             console.error("Erreur de récupération du modèle Word:", e);
             return res.status(500).json({ message: "Impossible de récupérer le modèle de leçon depuis l'URL fournie." });
         }
-        
         const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
         const classe = rowData[findKey(rowData, 'Classe')] || '';
         const matiere = rowData[findKey(rowData, 'Matière')] || '';
@@ -287,7 +279,6 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         const support = rowData[findKey(rowData, 'Support')] || 'Non spécifié';
         const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
         const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
-        
         let formattedDate = "";
         const weekNumber = Number(week);
         const datesNode = specificWeekDateRangesNode[weekNumber];
@@ -300,53 +291,18 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
                 }
             }
         }
-        
-        const jsonStructure = `{
-              "TitreUnite": "un titre d'unité pertinent pour la leçon",
-              "Methodes": "liste des méthodes d'enseignement",
-              "Outils": "liste des outils de travail",
-              "Objectifs": "une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\\\n). Commence chaque objectif par un tiret (-).",
-              "etapes": [
-                  { "phase": "Introduction", "duree": "5 min", "activite": "Description de l'activité d'introduction pour l'enseignant et les élèves." },
-                  { "phase": "Activité Principale", "duree": "25 min", "activite": "Description de l'activité principale, en intégrant les 'travaux de classe' et le 'support' si possible." },
-                  { "phase": "Synthèse", "duree": "10 min", "activite": "Description de l'activité de conclusion et de vérification des acquis." },
-                  { "phase": "Clôture", "duree": "5 min", "activite": "Résumé rapide et annonce des devoirs." }
-              ],
-              "Ressources": "les ressources spécifiques à utiliser.",
-              "Devoirs": "une suggestion de devoirs.",
-              "DiffLents": "une suggestion pour aider les apprenants en difficulté.",
-              "DiffTresPerf": "une suggestion pour stimuler les apprenants très performants.",
-              "DiffTous": "une suggestion de différenciation pour toute la classe."
-            }`;
-            
+        const jsonStructure = `{"TitreUnite": "un titre d'unité pertinent pour la leçon", "Methodes": "liste des méthodes d'enseignement", "Outils": "liste des outils de travail", "Objectifs": "une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\\\n). Commence chaque objectif par un tiret (-).", "etapes": [{"phase": "Introduction", "duree": "5 min", "activite": "Description de l'activité d'introduction pour l'enseignant et les élèves."}, {"phase": "Activité Principale", "duree": "25 min", "activite": "Description de l'activité principale, en intégrant les 'travaux de classe' et le 'support' si possible."}, {"phase": "Synthèse", "duree": "10 min", "activite": "Description de l'activité de conclusion et de vérification des acquis."}, {"phase": "Clôture", "duree": "5 min", "activite": "Résumé rapide et annonce des devoirs."}], "Ressources": "les ressources spécifiques à utiliser.", "Devoirs": "une suggestion de devoirs.", "DiffLents": "une suggestion pour aider les apprenants en difficulté.", "DiffTresPerf": "une suggestion pour stimuler les apprenants très performants.", "DiffTous": "une suggestion de différenciation pour toute la classe."}`;
         let prompt;
         if (englishTeachers.includes(enseignant)) {
-            prompt = `As an expert pedagogical assistant, create a detailed 45-minute lesson plan in English. Structure the lesson into timed phases. Intelligently integrate the teacher's existing notes:
-            - Subject: ${matiere}, Class: ${classe}, Lesson Topic: ${lecon}
-            - Planned Classwork: ${travaux}
-            - Mentioned Support/Materials: ${support}
-            - Planned Homework: ${devoirsPrevus}
-            Generate a response in valid JSON format only. The JSON structure must be as follows, with professional and concrete values in English: ${jsonStructure}`;
+            prompt = `As an expert pedagogical assistant, create a detailed 45-minute lesson plan in English. Structure the lesson into timed phases. Intelligently integrate the teacher's existing notes:\n- Subject: ${matiere}, Class: ${classe}, Lesson Topic: ${lecon}\n- Planned Classwork: ${travaux}\n- Mentioned Support/Materials: ${support}\n- Planned Homework: ${devoirsPrevus}\nGenerate a response in valid JSON format only. The JSON structure must be as follows, with professional and concrete values in English: ${jsonStructure}`;
         } else if (arabicTeachers.includes(enseignant)) {
-            prompt = `بصفتك مساعدًا تربويًا خبيرًا، قم بإنشاء خطة درس مفصلة باللغة العربية مدتها 45 دقيقة. قم ببناء الدرس في مراحل محددة بوقت. ادمج بذكاء ملاحظات المعلم الحالية:
-            - المادة: ${matiere}, الفصل: ${classe}, موضوع الدرس: ${lecon}
-            - عمل الفصل المخطط له: ${travaux}
-            - الدعم / المواد المذكورة: ${support}
-            - الواجبات المخطط لها: ${devoirsPrevus}
-            قم بإنشاء استجابة بتنسيق JSON صالح فقط. يجب أن تكون بنية JSON على النحو التالي، مع قيم مهنية وملموسة باللغة العربية، مع الحفاظ على المفاتيح باللغة الإنجليزية: ${jsonStructure}`;
+            prompt = `بصفتك مساعدًا تربويًا خبيرًا، قم بإنشاء خطة درس مفصلة باللغة العربية مدتها 45 دقيقة. قم ببناء الدرس في مراحل محددة بوقت. ادمج بذكاء ملاحظات المعلم الحالية:\n- المادة: ${matiere}, الفصل: ${classe}, موضوع الدرس: ${lecon}\n- عمل الفصل المخطط له: ${travaux}\n- الدعم / المواد المذكورة: ${support}\n- الواجبات المخطط لها: ${devoirsPrevus}\nقم بإنشاء استجابة بتنسيق JSON صالح فقط. يجب أن تكون بنية JSON على النحو التالي، مع قيم مهنية وملموسة باللغة العربية، مع الحفاظ على المفاتيح باللغة الإنجليزية: ${jsonStructure}`;
         } else {
-            prompt = `En tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure la leçon en phases chronométrées. Intègre de manière intelligente les notes existantes de l'enseignant :
-            - Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}
-            - Travaux de classe prévus : ${travaux}
-            - Support/Matériel mentionné : ${support}
-            - Devoirs prévus : ${devoirsPrevus}
-            Génère une réponse au format JSON valide uniquement. La structure JSON doit être la suivante, avec des valeurs concrètes et professionnelles en français : ${jsonStructure}`;
+            prompt = `En tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure la leçon en phases chronométrées. Intègre de manière intelligente les notes existantes de l'enseignant :\n- Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}\n- Travaux de classe prévus : ${travaux}\n- Support/Matériel mentionné : ${support}\n- Devoirs prévus : ${devoirsPrevus}\nGénère une réponse au format JSON valide uniquement. La structure JSON doit être la suivante, avec des valeurs concrètes et professionnelles en français : ${jsonStructure}`;
         }
-
         const result = await geminiModel.generateContent(prompt);
         const response = await result.response;
         let text = response.text();
-        
         text = text.replace(/```json/g, "").replace(/```/g, "").trim();
         let aiData;
         try {
@@ -355,50 +311,22 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             console.error("Erreur de parsing JSON de la réponse de l'IA:", text);
             return res.status(500).json({ message: "L'IA a retourné une réponse mal formée." });
         }
-
         const zip = new PizZip(templateBuffer);
         const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
-
         let minutageString = "";
         let contenuString = "";
         if (aiData.etapes && Array.isArray(aiData.etapes)) {
             minutageString = aiData.etapes.map(e => e.duree || "").join('\n');
             contenuString = aiData.etapes.map(e => `▶ ${e.phase || ""}:\n${e.activite || ""}`).join('\n\n');
         }
-
-        const templateData = {
-            ...aiData,
-            Semaine: week,
-            Lecon: lecon,
-            Matiere: matiere,
-            Classe: classe,
-            Jour: jour,
-            Seance: seance,
-            NomEnseignant: enseignant,
-            Date: formattedDate,
-            Deroulement: minutageString,
-            Contenu: contenuString,
-        };
-
+        const templateData = { ...aiData, Semaine: week, Lecon: lecon, Matiere: matiere, Classe: classe, Jour: jour, Seance: seance, NomEnseignant: enseignant, Date: formattedDate, Deroulement: minutageString, Contenu: contenuString, };
         doc.render(templateData);
-
         const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
-        
-        const sanitizeForFilename = (str) => {
-            if (typeof str !== 'string') str = String(str);
-            const normalized = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-            return normalized
-                .replace(/\s+/g, '-')
-                .replace(/[^a-zA-Z0-9-]/g, '_')
-                .replace(/__+/g, '_');
-        };
-        
+        const sanitizeForFilename = (str) => { if (typeof str !== 'string') str = String(str); const normalized = str.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); return normalized.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '_').replace(/__+/g, '_'); };
         const filename = `Plan de lecon-${sanitizeForFilename(matiere)}-${sanitizeForFilename(seance)}-${sanitizeForFilename(classe)}-Semaine${weekNumber}.docx`;
-        
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
         res.send(buf);
-
     } catch (error) {
         console.error('❌ Erreur serveur /generate-ai-lesson-plan:', error);
         if (!res.headersSent) {
@@ -407,6 +335,5 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         }
     }
 });
-
 
 module.exports = app;
