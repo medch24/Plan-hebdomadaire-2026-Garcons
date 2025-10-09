@@ -9,7 +9,7 @@ const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
 
 // ========================================================================
-// ========= FONCTIONS D'AIDE POUR LA GÉNÉRATION WORD (FINALES) ==========
+// ========= FONCTION D'AIDE POUR LA GÉNÉRATION WORD (VERSION FINALE CORRIGÉE) =========
 // ========================================================================
 
 const xmlEscape = (str) => {
@@ -26,55 +26,50 @@ const containsArabic = (text) => {
 };
 
 /**
- * Fonction DÉFINITIVE pour formater le texte pour Word avec des options de style.
- * Gère les sauts de ligne, l'alignement, le style et la couleur, tout en respectant l'espacement de la saisie.
- * @param {string} text - Le texte d'entrée à formater.
+ * Fonction DÉFINITIVE V3 pour formater le texte pour Word.
+ * Gère les sauts de ligne internes (<w:br/>), les styles combinés (couleur, italique) et la direction du texte.
+ * @param {string} text - Le texte d'entrée.
  * @param {object} [options={}] - Options de formatage.
- * @param {string} [options.color] - Couleur du texte en hexadécimal (ex: 'FF0000' pour rouge).
+ * @param {string} [options.color] - Couleur en hexadécimal (ex: 'FF0000').
  * @param {boolean} [options.italic] - Appliquer le style italique.
  * @returns {string} La chaîne XML WordprocessingML formatée.
  */
 const formatTextForWord = (text, options = {}) => {
-    // Si le texte est vide ou non défini, retourne un paragraphe vide pour conserver l'espacement.
     if (!text || typeof text !== 'string' || text.trim() === '') {
-        return '<w:p/>';
+        return '<w:p/>'; // Retourne un paragraphe vide pour la cohérence.
     }
 
     const { color, italic } = options;
-    // Sépare le texte en lignes pour traiter chaque saut de ligne individuellement.
+    
+    // Construction des propriétés de style pour le texte (run)
+    const runPropertiesParts = [];
+    runPropertiesParts.push('<w:sz w:val="22"/><w:szCs w:val="22"/>'); // Police taille 11
+    if (color) {
+        runPropertiesParts.push(`<w:color w:val="${color}"/>`);
+    }
+    if (italic) {
+        runPropertiesParts.push('<w:i/><w:iCs w:val="true"/>');
+    }
+    
+    // Construction des propriétés de paragraphe (pour l'alignement)
+    let paragraphProperties = '';
+    if (containsArabic(text)) {
+        paragraphProperties = '<w:pPr><w:jc w:val="right"/></w:pPr>';
+        runPropertiesParts.push('<w:rtl/>'); // Direction RTL pour le texte
+    }
+    const runProperties = `<w:rPr>${runPropertiesParts.join('')}</w:rPr>`;
+
+    // Sépare le texte en lignes en fonction des sauts de ligne de la saisie
     const lines = text.split(/\r\n|\n|\r/);
 
-    return lines.map(line => {
-        // Pour chaque saut de ligne intentionnel (ligne vide), créer un paragraphe Word vide.
-        if (line.trim() === '') {
-            return '<w:p/>';
-        }
-
-        const escapedLine = xmlEscape(line);
-        let paragraphProperties = '';
-        const runPropertiesParts = [];
-        
-        // Conserve la taille de la police par défaut du template (11pt, soit 22 half-points)
-        runPropertiesParts.push('<w:sz w:val="22"/><w:szCs w:val="22"/>');
-
-        if (color) {
-            runPropertiesParts.push(`<w:color w:val="${color}"/>`);
-        }
-        if (italic) {
-            runPropertiesParts.push('<w:i/><w:iCs w:val="true"/>');
-        }
-        if (containsArabic(line)) {
-            paragraphProperties = '<w:pPr><w:jc w:val="right"/></w:pPr>';
-            runPropertiesParts.push('<w:rtl/>');
-        }
-        
-        const runProperties = runPropertiesParts.length > 0 
-            ? `<w:rPr>${runPropertiesParts.join('')}</w:rPr>` 
-            : '';
-        
-        // xml:space="preserve" est crucial pour garder les espaces multiples au sein d'une ligne.
-        return `<w:p>${paragraphProperties}<w:r>${runProperties}<w:t xml:space="preserve">${escapedLine}</w:t></w:r></w:p>`;
-    }).join('');
+    // Crée le contenu interne du 'run' (<w:r>)
+    // Chaque ligne devient un <w:t>, et un <w:br/> est inséré entre eux.
+    const content = lines
+        .map(line => `<w:t xml:space="preserve">${xmlEscape(line)}</w:t>`)
+        .join('<w:br/>');
+    
+    // Assemble le paragraphe final
+    return `<w:p>${paragraphProperties}<w:r>${runProperties}${content}</w:r></w:p>`;
 };
 
 
@@ -165,9 +160,6 @@ app.post('/api/generate-word', async (req, res) => {
         }
         
         const zip = new PizZip(templateBuffer);
-        // ## CORRECTION : On utilise le constructeur standard.
-        // La syntaxe `{@tag}` dans le template .docx est suffisante pour que
-        // docxtemplater interprète le contenu comme du XML.
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
             nullGetter: () => "",
@@ -203,14 +195,13 @@ app.post('/api/generate-word', async (req, res) => {
             const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
             const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
             
-            // Les noms des clés ici doivent correspondre aux tags SANS le '@' dans le template.
-            // Ex: La clé 'Lecon' correspondra au tag `{@Lecon}` dans le .docx
+            // ### MODIFICATIONS APPLIQUÉES ICI ###
             const matieres = sortedEntries.map(item => ({
                 matiere: item[matiereKey] ?? "",
-                Lecon: formatTextForWord(item[leconKey], { color: 'FF0000' }),
-                travailDeClasse: formatTextForWord(item[travauxKey]),
-                Support: formatTextForWord(item[supportKey], { italic: true }),
-                devoirs: formatTextForWord(item[devoirsKey])
+                Lecon: formatTextForWord(item[leconKey], { color: 'FF0000' }), // Rouge
+                travailDeClasse: formatTextForWord(item[travauxKey]), // Style par défaut
+                Support: formatTextForWord(item[supportKey], { color: 'FF0000', italic: true }), // Rouge et Italique
+                devoirs: formatTextForWord(item[devoirsKey], { color: '0000FF', italic: true }) // Bleu et Italique
             }));
             
             return { jourDateComplete: formattedDate, matieres: matieres };
@@ -224,7 +215,6 @@ app.post('/api/generate-word', async (req, res) => {
             }
         }
         
-        // La clé 'notes' correspondra au tag `{@notes}`
         const templateData = {
             semaine: weekNumber,
             classe: classe,
