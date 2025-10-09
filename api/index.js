@@ -1,3 +1,4 @@
+javascript
 const express = require('express');
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
@@ -9,7 +10,7 @@ const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
 
 // ========================================================================
-// ========= FONCTIONS D'AIDE POUR LA GÉNÉRATION WORD (FINALES) ==========
+// ========= FONCTIONS D'AIDE POUR LA GÉNÉRATION WORD (FINALES AMÉLIORÉES) ==========
 // ========================================================================
 
 const xmlEscape = (str) => {
@@ -26,33 +27,60 @@ const containsArabic = (text) => {
 };
 
 /**
- * Fonction DÉFINITIVE pour formater le texte pour Word.
- * Gère les sauts de ligne, l'alignement à droite et la direction RTL pour l'arabe.
+ * Fonction DÉFINITIVE pour formater le texte pour Word avec des options de style.
+ * Gère les sauts de ligne, l'alignement, le style et la couleur, tout en respectant l'espacement de la saisie.
+ * @param {string} text - Le texte d'entrée à formater.
+ * @param {object} [options={}] - Options de formatage.
+ * @param {string} [options.color] - Couleur du texte en hexadécimal (ex: 'FF0000' pour rouge).
+ * @param {boolean} [options.italic] - Appliquer le style italique.
+ * @returns {string} La chaîne XML WordprocessingML formatée.
  */
-const formatTextForWord = (text) => {
+const formatTextForWord = (text, options = {}) => {
+    // Si le texte est vide ou non défini, retourne un paragraphe vide pour conserver l'espacement.
     if (!text || typeof text !== 'string' || text.trim() === '') {
-        return '<w:p/>'; // Retourne un paragraphe vide pour éviter les erreurs.
+        return '<w:p/>';
     }
 
+    const { color, italic } = options;
+    // Sépare le texte en lignes pour traiter chaque saut de ligne individuellement.
     const lines = text.split(/\r\n|\n|\r/);
 
     return lines.map(line => {
+        // Pour chaque saut de ligne intentionnel (ligne vide), créer un paragraphe Word vide.
+        // C'est la clé pour respecter les espacements verticaux.
+        if (line.trim() === '') {
+            return '<w:p/>';
+        }
+
         const escapedLine = xmlEscape(line);
         let paragraphProperties = '';
-        let runProperties = '';
+        const runPropertiesParts = [];
+        
+        // Conserve la taille de la police par défaut du template (11pt, soit 22 half-points)
+        runPropertiesParts.push('<w:sz w:val="22"/><w:szCs w:val="22"/>');
 
-        if (containsArabic(line)) {
-            // Propriété pour le paragraphe : alignement à droite
-            paragraphProperties = '<w:pPr><w:jc w:val="right"/></w:pPr>';
-            // Propriété pour le bloc de texte : direction RTL
-            runProperties = '<w:rPr><w:rtl/></w:rPr>';
+        // Ajoute la balise de couleur si une couleur est spécifiée.
+        if (color) {
+            runPropertiesParts.push(`<w:color w:val="${color}"/>`);
+        }
+        // Ajoute la balise italique si demandée.
+        if (italic) {
+            // <w:i/> pour les polices standards, <w:iCs/> pour les polices de scripts complexes (Arabe etc.)
+            runPropertiesParts.push('<w:i/><w:iCs w:val="true"/>');
         }
 
-        if (escapedLine.trim() === '') {
-            return '<w:p/>'; // Crée un paragraphe vide pour simuler un saut de ligne.
+        // Gérer le texte en arabe : alignement à droite et direction RTL.
+        if (containsArabic(line)) {
+            paragraphProperties = '<w:pPr><w:jc w:val="right"/></w:pPr>';
+            runPropertiesParts.push('<w:rtl/>');
         }
         
-        // Construit la structure XML correcte, en séparant les propriétés du paragraphe et du texte.
+        const runProperties = runPropertiesParts.length > 0 
+            ? `<w:rPr>${runPropertiesParts.join('')}</w:rPr>` 
+            : '';
+        
+        // Construit la structure XML finale pour cette ligne de texte.
+        // xml:space="preserve" est crucial pour garder les espaces multiples au sein d'une ligne.
         return `<w:p>${paragraphProperties}<w:r>${runProperties}<w:t xml:space="preserve">${escapedLine}</w:t></w:r></w:p>`;
     }).join('');
 };
@@ -136,6 +164,7 @@ app.post('/api/generate-word', async (req, res) => {
         const zip = new PizZip(templateBuffer);
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
+            linebreaks: true, // Important pour que docxtemplater gère les sauts de ligne XML
             nullGetter: () => "",
         });
 
@@ -171,10 +200,10 @@ app.post('/api/generate-word', async (req, res) => {
             
             const matieres = sortedEntries.map(item => ({
                 matiere: item[matiereKey] ?? "",
-                Lecon: formatTextForWord(item[leconKey]),
-                travailDeClasse: formatTextForWord(item[travauxKey]),
-                Support: formatTextForWord(item[supportKey]),
-                devoirs: formatTextForWord(item[devoirsKey])
+                Lecon: formatTextForWord(item[leconKey], { color: 'FF0000' }),
+                travailDeClasse: formatTextForWord(item[travauxKey]), // Style par défaut
+                Support: formatTextForWord(item[supportKey], { italic: true }),
+                devoirs: formatTextForWord(item[devoirsKey]) // Style par défaut
             }));
             
             return { jourDateComplete: formattedDate, matieres: matieres };
@@ -196,7 +225,15 @@ app.post('/api/generate-word', async (req, res) => {
             plageSemaine: plageSemaineText
         };
         
-        doc.render(templateData);
+        // Indiquer à docxtemplater que les champs formatés sont du XML brut
+        doc.setData(templateData);
+        
+        try {
+            doc.render();
+        } catch (error) {
+            console.error("Erreur de rendu Docxtemplater:", error);
+            throw error;
+        }
         
         const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
         const filename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`;
