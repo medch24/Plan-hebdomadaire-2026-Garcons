@@ -53,8 +53,7 @@ const formatTextForWord = (text, options = {}) => {
     
     // Construction des propriétés de paragraphe (pour l'alignement ET la direction)
     let paragraphProperties = '';
-    // ### MODIFICATION POUR RTL ###
-    // Ajout de <w:bidi/> pour forcer la direction de droite à gauche du paragraphe
+    // La ligne ci-dessous gère BIEN les deux options : alignement et direction
     if (containsArabic(text)) {
         paragraphProperties = '<w:pPr><w:jc w:val="right"/><w:bidi/></w:pPr>';
         runPropertiesParts.push('<w:rtl/>'); // Direction RTL pour le bloc de texte
@@ -65,8 +64,6 @@ const formatTextForWord = (text, options = {}) => {
     const lines = text.split(/\r\n|\n|\r/);
 
     // Crée le contenu interne du 'run' (<w:r>)
-    // Chaque ligne devient un <w:t>, et un <w:br/> est inséré entre eux.
-    // Ceci crée des "sauts de ligne doux" (Maj+Entrée) au lieu de nouveaux paragraphes.
     const content = lines
         .map(line => `<w:t xml:space="preserve">${xmlEscape(line)}</w:t>`)
         .join('<w:br/>');
