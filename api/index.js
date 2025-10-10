@@ -4,7 +4,7 @@ const fileUpload = require('express-fileupload');
 const XLSX = require('xlsx');
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+// On retire l'import de GoogleGenerativeAI qui n'est plus utilisé pour cette fonction
 const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
 
@@ -62,18 +62,6 @@ app.use(fileUpload());
 const MONGO_URL = process.env.MONGO_URL;
 const WORD_TEMPLATE_URL = process.env.WORD_TEMPLATE_URL;
 const LESSON_TEMPLATE_URL = process.env.LESSON_TEMPLATE_URL;
-let geminiModel; // On réintroduit la variable globale pour le modèle
-
-// Configuration de Gemini
-if (process.env.GEMINI_API_KEY) {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    // On utilise le modèle le plus rapide et le plus récent
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    console.log('✅ SDK Google Gemini initialisé avec le modèle gemini-1.5-flash.');
-} else {
-    console.warn('⚠️ GEMINI_API_KEY non défini. La fonctionnalité IA sera désactivée.');
-}
-
 
 const arabicTeachers = ['Majed', 'Jaber', 'Imad', 'Saeed'];
 const englishTeachers = ['Kamel'];
@@ -223,7 +211,8 @@ app.post('/api/full-report-by-class', async (req, res) => { try { const { classe
 
 app.post('/api/generate-ai-lesson-plan', async (req, res) => {
     try {
-        if (!geminiModel) {
+        const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+        if (!GEMINI_API_KEY) {
             return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });
         }
         
@@ -281,11 +270,34 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             prompt = `En tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure la leçon en phases chronométrées. Intègre de manière intelligente les notes existantes de l'enseignant :\n- Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}\n- Travaux de classe prévus : ${travaux}\n- Support/Matériel mentionné : ${support}\n- Devoirs prévus : ${devoirsPrevus}\nGénère une réponse au format JSON valide uniquement. La structure JSON doit être la suivante, avec des valeurs concrètes et professionnelles en français : ${jsonStructure}`;
         }
 
-        const result = await geminiModel.generateContent(prompt);
-        const response = await result.response;
-        let text = response.text();
+        // Construction de l'appel direct à l'API v1
+        const MODEL_NAME = "gemini-1.5-flash"; // On utilise le modèle le plus rapide et le plus récent
+        const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+
+        const requestBody = {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+                responseMimeType: "application/json", // On demande explicitement du JSON
+            }
+        };
+
+        const aiResponse = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+        });
+
+        if (!aiResponse.ok) {
+            const errorBody = await aiResponse.json();
+            console.error("Erreur de l'API Google AI:", JSON.stringify(errorBody, null, 2));
+            throw new Error(`[${aiResponse.status} ${aiResponse.statusText}] ${errorBody.error?.message || 'Erreur inconnue de l\'API.'}`);
+        }
+
+        const aiResult = await aiResponse.json();
+        let text = aiResult.candidates[0].content.parts[0].text;
         
-        text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        // Nettoyage supplémentaire au cas où
+        text = text.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
         let aiData;
         try {
             aiData = JSON.parse(text);
