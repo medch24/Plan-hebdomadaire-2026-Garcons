@@ -26,22 +26,22 @@ const containsArabic = (text) => {
 };
 
 /**
- * Fonction DÉFINITIVE V3 pour formater le texte pour Word.
- * Gère les sauts de ligne internes (<w:br/>), les styles combinés (couleur, italique) et la direction du texte.
+ * Fonction DÉFINITIVE V4 pour formater le texte pour Word.
+ * Gère les sauts de ligne internes, les styles, l'alignement et la direction du texte.
  * @param {string} text - Le texte d'entrée.
  * @param {object} [options={}] - Options de formatage.
- * @param {string} [options.color] - Couleur en hexadécimal (ex: 'FF0000').
+ * @param {string} [options.color] - Couleur en hexadécimal.
  * @param {boolean} [options.italic] - Appliquer le style italique.
  * @returns {string} La chaîne XML WordprocessingML formatée.
  */
 const formatTextForWord = (text, options = {}) => {
     if (!text || typeof text !== 'string' || text.trim() === '') {
-        return '<w:p/>'; // Retourne un paragraphe vide pour la cohérence.
+        return '<w:p/>';
     }
 
     const { color, italic } = options;
     
-    // Construction des propriétés de style pour le texte (run)
+    // --- Propriétés du texte (run) ---
     const runPropertiesParts = [];
     runPropertiesParts.push('<w:sz w:val="22"/><w:szCs w:val="22"/>'); // Police taille 11
     if (color) {
@@ -51,24 +51,24 @@ const formatTextForWord = (text, options = {}) => {
         runPropertiesParts.push('<w:i/><w:iCs w:val="true"/>');
     }
     
-    // Construction des propriétés de paragraphe (pour l'alignement ET la direction)
+    // --- Propriétés du paragraphe ---
     let paragraphProperties = '';
-    // La ligne ci-dessous gère BIEN les deux options : alignement et direction
+    // ### CORRECTION FINALE POUR L'ARABE ###
+    // Applique à la fois l'alignement à droite (jc) et la direction RTL (bidi)
+    // au niveau du paragraphe, ce qui est la méthode la plus stable.
     if (containsArabic(text)) {
         paragraphProperties = '<w:pPr><w:jc w:val="right"/><w:bidi/></w:pPr>';
-        runPropertiesParts.push('<w:rtl/>'); // Direction RTL pour le bloc de texte
+        runPropertiesParts.push('<w:rtl/>'); // On garde ceci pour la sémantique du texte lui-même
     }
     const runProperties = `<w:rPr>${runPropertiesParts.join('')}</w:rPr>`;
 
-    // Sépare le texte en lignes en fonction des sauts de ligne de la saisie
+    // Sépare le texte en lignes pour les transformer en sauts de ligne doux (<w:br/>)
     const lines = text.split(/\r\n|\n|\r/);
-
-    // Crée le contenu interne du 'run' (<w:r>)
     const content = lines
         .map(line => `<w:t xml:space="preserve">${xmlEscape(line)}</w:t>`)
         .join('<w:br/>');
     
-    // Assemble le paragraphe final
+    // Assemble le paragraphe XML final
     return `<w:p>${paragraphProperties}<w:r>${runProperties}${content}</w:r></w:p>`;
 };
 
