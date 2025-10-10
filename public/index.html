@@ -30,6 +30,10 @@
             padding-bottom: 15px;      /* Espace avant le tableau */
             padding-left: 15px;        /* Marge identique aux autres conteneurs */
         }
+        /* Style pour que les sauts de ligne soient visibles dans les cellules éditables */
+        td.editable {
+            white-space: pre-wrap;
+        }
     </style>
 
 </head>
@@ -423,11 +427,12 @@
                     } else if (editHdrKeys.includes(header)) {
                         td.contentEditable = true;
                         td.classList.add('editable');
-                        td.textContent = content;
+                        td.innerText = content; // ### CORRECTION : Utiliser innerText pour préserver les sauts de ligne à l'affichage
                         td.spellcheck = true;
                         td.addEventListener('input', (e) => {
+                            // ### CORRECTION : Utiliser innerText pour lire les sauts de ligne lors de la modification
                             if (rowObj) {
-                                rowObj[header] = e.target.textContent;
+                                rowObj[header] = e.target.innerText;
                             }
                             const parentTR = e.target.closest('tr');
                             if (parentTR) {
@@ -501,7 +506,6 @@
             
             document.getElementById('loggedInUserInfo').textContent = t('connected_as', { user: loggedInUser });
             
-            // ===== MODIFICATION APPLIQUÉE ICI =====
             if (loggedInUser === 'Mohamed') { 
                 document.getElementById('admin-actions').style.display = 'flex';
                 populateAdminReportClassSelector();
