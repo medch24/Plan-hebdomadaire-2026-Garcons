@@ -285,7 +285,9 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPrompt }
-            ]
+            ],
+            // ### CORRECTION : Ajout du paramètre max_tokens pour permettre une réponse plus longue ###
+            max_tokens: 2048 
         };
 
         const aiResponse = await fetch(API_URL, {
