@@ -270,15 +270,12 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
             prompt = `En tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure la leçon en phases chronométrées. Intègre de manière intelligente les notes existantes de l'enseignant :\n- Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}\n- Travaux de classe prévus : ${travaux}\n- Support/Matériel mentionné : ${support}\n- Devoirs prévus : ${devoirsPrevus}\nGénère une réponse au format JSON valide uniquement. La structure JSON doit être la suivante, avec des valeurs concrètes et professionnelles en français : ${jsonStructure}`;
         }
 
-        // Construction de l'appel direct à l'API v1
-        const MODEL_NAME = "gemini-1.5-flash"; // On utilise le modèle le plus rapide et le plus récent
+        const MODEL_NAME = "gemini-1.5-flash";
         const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
 
         const requestBody = {
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-                responseMimeType: "application/json", // On demande explicitement du JSON
-            }
+            // ### CORRECTION : Suppression du bloc "generationConfig" qui causait l'erreur 400
         };
 
         const aiResponse = await fetch(API_URL, {
@@ -296,8 +293,7 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         const aiResult = await aiResponse.json();
         let text = aiResult.candidates[0].content.parts[0].text;
         
-        // Nettoyage supplémentaire au cas où
-        text = text.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
+        text = text.replace(/```json/g, "").replace(/```/g, "").trim();
         let aiData;
         try {
             aiData = JSON.parse(text);
