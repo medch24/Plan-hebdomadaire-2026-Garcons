@@ -53,22 +53,17 @@ const formatTextForWord = (text, options = {}) => {
     
     // --- Propriétés du paragraphe ---
     let paragraphProperties = '';
-    // ### CORRECTION FINALE POUR L'ARABE ###
-    // Applique à la fois l'alignement à droite (jc) et la direction RTL (bidi)
-    // au niveau du paragraphe, ce qui est la méthode la plus stable.
     if (containsArabic(text)) {
         paragraphProperties = '<w:pPr><w:jc w:val="right"/><w:bidi/></w:pPr>';
-        runPropertiesParts.push('<w:rtl/>'); // On garde ceci pour la sémantique du texte lui-même
+        runPropertiesParts.push('<w:rtl/>');
     }
     const runProperties = `<w:rPr>${runPropertiesParts.join('')}</w:rPr>`;
 
-    // Sépare le texte en lignes pour les transformer en sauts de ligne doux (<w:br/>)
     const lines = text.split(/\r\n|\n|\r/);
     const content = lines
         .map(line => `<w:t xml:space="preserve">${xmlEscape(line)}</w:t>`)
         .join('<w:br/>');
     
-    // Assemble le paragraphe XML final
     return `<w:p>${paragraphProperties}<w:r>${runProperties}${content}</w:r></w:p>`;
 };
 
@@ -89,8 +84,11 @@ if (!MONGO_URL) console.error('FATAL: MONGO_URL n\'est pas définie.');
 
 if (process.env.GEMINI_API_KEY) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
-    console.log('✅ SDK Google Gemini initialisé avec le modèle gemini-pro.');
+    // ### CORRECTION FINALE APPLIQUÉE ICI ###
+    // Utilisation du nom de modèle le plus récent et stable : "gemini-1.5-flash"
+    // Ce nom est compatible avec la dernière version de la bibliothèque.
+    geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    console.log('✅ SDK Google Gemini initialisé avec le modèle gemini-1.5-flash.');
 } else {
     console.warn('⚠️ GEMINI_API_KEY non défini. La fonctionnalité IA sera désactivée.');
 }
@@ -368,4 +366,3 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
 
 
 module.exports = app;
-
