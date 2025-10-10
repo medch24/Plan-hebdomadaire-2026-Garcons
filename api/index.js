@@ -4,7 +4,7 @@ const fileUpload = require('express-fileupload');
 const XLSX = require('xlsx');
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+// On retire l'import de GoogleGenerativeAI qui n'est plus utilisé
 const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
 
@@ -211,9 +211,11 @@ app.post('/api/full-report-by-class', async (req, res) => { try { const { classe
 
 app.post('/api/generate-ai-lesson-plan', async (req, res) => {
     try {
-        const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-        if (!GEMINI_API_KEY) {
-            return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });
+        const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
+        const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
+
+        if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) {
+            return res.status(503).json({ message: "Le service IA Cloudflare n'est pas configuré. Vérifiez les variables d'environnement." });
         }
         
         const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL;
@@ -261,36 +263,52 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
         
         const jsonStructure = `{"TitreUnite": "un titre d'unité pertinent pour la leçon","Methodes": "liste des méthodes d'enseignement","Outils": "liste des outils de travail","Objectifs": "une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\\\n). Commence chaque objectif par un tiret (-).","etapes": [{"phase": "Introduction", "duree": "5 min", "activite": "Description de l'activité d'introduction pour l'enseignant et les élèves."}, {"phase": "Activité Principale", "duree": "25 min", "activite": "Description de l'activité principale, en intégrant les 'travaux de classe' et le 'support' si possible."}, {"phase": "Synthèse", "duree": "10 min", "activite": "Description de l'activité de conclusion et de vérification des acquis."}, {"phase": "Clôture", "duree": "5 min", "activite": "Résumé rapide et annonce des devoirs."}],"Ressources": "les ressources spécifiques à utiliser.","Devoirs": "une suggestion de devoirs.","DiffLents": "une suggestion pour aider les apprenants en difficulté.","DiffTresPerf": "une suggestion pour stimuler les apprenants très performants.","DiffTous": "une suggestion de différenciation pour toute la classe."}`;
             
-        let prompt;
+        let languageInstruction, lessonDetails;
         if (englishTeachers.includes(enseignant)) {
-            prompt = `As an expert pedagogical assistant, create a detailed 45-minute lesson plan in English. Structure the lesson into timed phases. Intelligently integrate the teacher's existing notes:\n- Subject: ${matiere}, Class: ${classe}, Lesson Topic: ${lecon}\n- Planned Classwork: ${travaux}\n- Mentioned Support/Materials: ${support}\n- Planned Homework: ${devoirsPrevus}\nGenerate a response in valid JSON format only. The JSON structure must be as follows, with professional and concrete values in English: ${jsonStructure}`;
+            languageInstruction = "in English";
+            lessonDetails = `- Subject: ${matiere}, Class: ${classe}, Lesson Topic: ${lecon}\n- Planned Classwork: ${travaux}\n- Mentioned Support/Materials: ${support}\n- Planned Homework: ${devoirsPrevus}`;
         } else if (arabicTeachers.includes(enseignant)) {
-            prompt = `بصفتك مساعدًا تربويًا خبيرًا، قم بإنشاء خطة درس مفصلة باللغة العربية مدتها 45 دقيقة. قم ببناء الدرس في مراحل محددة بوقت. ادمج بذكاء ملاحظات المعلم الحالية:\n- المادة: ${matiere}, الفصل: ${classe}, موضوع الدرس: ${lecon}\n- عمل الفصل المخطط له: ${travaux}\n- الدعم / المواد المذكورة: ${support}\n- الواجبات المخطط لها: ${devoirsPrevus}\nقم بإنشاء استجابة بتنسيق JSON صالح فقط. يجب أن تكون بنية JSON على النحو التالي، مع قيم مهنية وملموسة باللغة العربية، مع الحفاظ على المفاتيح باللغة الإنجليزية: ${jsonStructure}`;
+            languageInstruction = "in Arabic, keeping the JSON keys in English";
+            lessonDetails = `- المادة: ${matiere}, الفصل: ${classe}, موضوع الدرس: ${lecon}\n- عمل الفصل المخطط له: ${travaux}\n- الدعم / المواد المذكورة: ${support}\n- الواجبات المخطط لها: ${devoirsPrevus}`;
         } else {
-            prompt = `En tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure la leçon en phases chronométrées. Intègre de manière intelligente les notes existantes de l'enseignant :\n- Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}\n- Travaux de classe prévus : ${travaux}\n- Support/Matériel mentionné : ${support}\n- Devoirs prévus : ${devoirsPrevus}\nGénère une réponse au format JSON valide uniquement. La structure JSON doit être la suivante, avec des valeurs concrètes et professionnelles en français : ${jsonStructure}`;
+            languageInstruction = "in French";
+            lessonDetails = `- Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}\n- Travaux de classe prévus : ${travaux}\n- Support/Matériel mentionné : ${support}\n- Devoirs prévus : ${devoirsPrevus}`;
         }
 
-        const MODEL_NAME = "gemini-1.0-pro";
-        const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+        const systemPrompt = `You are an expert pedagogical assistant. Your task is to generate a detailed 45-minute lesson plan. The response must be a valid JSON object only, without any surrounding text or markdown. The JSON structure must be exactly as follows: ${jsonStructure}`;
+        const userPrompt = `Create the lesson plan ${languageInstruction}. Intelligently integrate the teacher's existing notes:\n${lessonDetails}`;
+
+        const MODEL_NAME = "@cf/meta/llama-3-8b-instruct";
+        const API_URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_NAME}`;
 
         const requestBody = {
-            contents: [{ parts: [{ text: prompt }] }],
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt }
+            ]
         };
 
         const aiResponse = await fetch(API_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+                'Content-Type': 'application/json' 
+            },
             body: JSON.stringify(requestBody),
         });
 
         if (!aiResponse.ok) {
-            const errorBody = await aiResponse.json();
-            console.error("Erreur de l'API Google AI:", JSON.stringify(errorBody, null, 2));
-            throw new Error(`[${aiResponse.status} ${aiResponse.statusText}] ${errorBody.error?.message || 'Erreur inconnue de l\'API.'}`);
+            const errorText = await aiResponse.text();
+            console.error("Erreur de l'API Cloudflare:", errorText);
+            throw new Error(`[${aiResponse.status} ${aiResponse.statusText}] Erreur de l'API Cloudflare.`);
         }
 
         const aiResult = await aiResponse.json();
-        let text = aiResult.candidates[0].content.parts[0].text;
+        let text = aiResult.result?.response;
+
+        if (!text) {
+             throw new Error("La réponse de l'API Cloudflare est vide ou mal formée.");
+        }
         
         text = text.replace(/```json/g, "").replace(/```/g, "").trim();
         let aiData;
