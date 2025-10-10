@@ -51,11 +51,13 @@ const formatTextForWord = (text, options = {}) => {
         runPropertiesParts.push('<w:i/><w:iCs w:val="true"/>');
     }
     
-    // Construction des propriétés de paragraphe (pour l'alignement)
+    // Construction des propriétés de paragraphe (pour l'alignement ET la direction)
     let paragraphProperties = '';
+    // ### MODIFICATION POUR RTL ###
+    // Ajout de <w:bidi/> pour forcer la direction de droite à gauche du paragraphe
     if (containsArabic(text)) {
-        paragraphProperties = '<w:pPr><w:jc w:val="right"/></w:pPr>';
-        runPropertiesParts.push('<w:rtl/>'); // Direction RTL pour le texte
+        paragraphProperties = '<w:pPr><w:jc w:val="right"/><w:bidi/></w:pPr>';
+        runPropertiesParts.push('<w:rtl/>'); // Direction RTL pour le bloc de texte
     }
     const runProperties = `<w:rPr>${runPropertiesParts.join('')}</w:rPr>`;
 
@@ -64,6 +66,7 @@ const formatTextForWord = (text, options = {}) => {
 
     // Crée le contenu interne du 'run' (<w:r>)
     // Chaque ligne devient un <w:t>, et un <w:br/> est inséré entre eux.
+    // Ceci crée des "sauts de ligne doux" (Maj+Entrée) au lieu de nouveaux paragraphes.
     const content = lines
         .map(line => `<w:t xml:space="preserve">${xmlEscape(line)}</w:t>`)
         .join('<w:br/>');
@@ -195,13 +198,12 @@ app.post('/api/generate-word', async (req, res) => {
             const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
             const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
             
-            // ### MODIFICATIONS APPLIQUÉES ICI ###
             const matieres = sortedEntries.map(item => ({
                 matiere: item[matiereKey] ?? "",
-                Lecon: formatTextForWord(item[leconKey], { color: 'FF0000' }), // Rouge
-                travailDeClasse: formatTextForWord(item[travauxKey]), // Style par défaut
-                Support: formatTextForWord(item[supportKey], { color: 'FF0000', italic: true }), // Rouge et Italique
-                devoirs: formatTextForWord(item[devoirsKey], { color: '0000FF', italic: true }) // Bleu et Italique
+                Lecon: formatTextForWord(item[leconKey], { color: 'FF0000' }),
+                travailDeClasse: formatTextForWord(item[travauxKey]),
+                Support: formatTextForWord(item[supportKey], { color: 'FF0000', italic: true }),
+                devoirs: formatTextForWord(item[devoirsKey], { color: '0000FF', italic: true })
             }));
             
             return { jourDateComplete: formattedDate, matieres: matieres };
