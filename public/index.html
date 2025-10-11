@@ -33,6 +33,7 @@
         /* Style pour que les sauts de ligne soient visibles dans les cellules éditables */
         td.editable {
             white-space: pre-wrap;
+            word-wrap: break-word;
         }
     </style>
 
@@ -427,12 +428,12 @@
                     } else if (editHdrKeys.includes(header)) {
                         td.contentEditable = true;
                         td.classList.add('editable');
-                        td.innerText = content; // ### CORRECTION : Utiliser innerText pour préserver les sauts de ligne à l'affichage
+                        td.textContent = content; // Utiliser textContent pour préserver les sauts de ligne
                         td.spellcheck = true;
                         td.addEventListener('input', (e) => {
                             // ### CORRECTION : Utiliser innerText pour lire les sauts de ligne lors de la modification
                             if (rowObj) {
-                                rowObj[header] = e.target.innerText;
+                                rowObj[header] = e.target.textContent;
                             }
                             const parentTR = e.target.closest('tr');
                             if (parentTR) {

@@ -1,6 +1,7 @@
 // api/index.js — Version REST (fetch) corrigée
 
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
 const XLSX = require('xlsx');
@@ -55,6 +56,9 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(fileUpload());
+
+// Servir les fichiers statiques depuis le dossier public
+app.use(express.static(path.join(__dirname, '../public')));
 
 const MONGO_URL = process.env.MONGO_URL;
 const WORD_TEMPLATE_URL = process.env.WORD_TEMPLATE_URL;
@@ -609,5 +613,14 @@ Génère une réponse au format JSON valide uniquement selon la structure suivan
     }
   }
 });
+
+// Démarrer le serveur seulement si ce fichier est exécuté directement
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Serveur Plans Hebdomadaires démarré sur le port ${PORT}`);
+    console.log(`📝 Application accessible à l'adresse : http://localhost:${PORT}`);
+  });
+}
 
 module.exports = app;
