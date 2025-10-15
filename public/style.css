@@ -281,6 +281,17 @@ tr.modified > td.editable {
     background-color: #fff3cd !important;
 }
 
+/* Support RTL pour l'écriture arabe */
+td.editable.arabic-content {
+    direction: rtl;
+    text-align: right;
+}
+
+#notesInput.arabic-content {
+    direction: rtl;
+    text-align: right;
+}
+
 /* --- ANIMATIONS ET EFFETS --- */
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(-10px); }
