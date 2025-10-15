@@ -39,8 +39,10 @@ const formatTextForWord = (text, options = {}) => {
 
   let paragraphProperties = '';
   if (containsArabic(text)) {
-    paragraphProperties = '<w:pPr><w:jc w:val="right"/><w:bidi/></w:pPr>';
-    runPropertiesParts.push('<w:rtl/>');
+    paragraphProperties = '<w:pPr><w:jc w:val="right"/><w:bidi w:val="1"/><w:textDirection w:val="rl"/></w:pPr>';
+    runPropertiesParts.push('<w:rtl w:val="1"/>');
+    runPropertiesParts.push('<w:cs/>'); // Complex script pour l'arabe
+    runPropertiesParts.push('<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Arabic Typesetting"/>');
   }
 
   const runProperties = `<w:rPr>${runPropertiesParts.join('')}</w:rPr>`;
