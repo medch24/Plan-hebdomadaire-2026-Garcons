@@ -39,10 +39,12 @@ const formatTextForWord = (text, options = {}) => {
 
   let paragraphProperties = '';
   if (containsArabic(text)) {
-    paragraphProperties = '<w:pPr><w:jc w:val="right"/><w:bidi w:val="1"/><w:textDirection w:val="rl"/></w:pPr>';
+    // Police Arial 12pt, orientation RTL, centré
+    paragraphProperties = '<w:pPr><w:jc w:val="center"/><w:bidi w:val="1"/><w:textDirection w:val="rl"/></w:pPr>';
+    runPropertiesParts[0] = '<w:sz w:val="24"/><w:szCs w:val="24"/>'; // 12pt = 24 half-points
     runPropertiesParts.push('<w:rtl w:val="1"/>');
     runPropertiesParts.push('<w:cs/>'); // Complex script pour l'arabe
-    runPropertiesParts.push('<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Arabic Typesetting"/>');
+    runPropertiesParts.push('<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>');
   }
 
   const runProperties = `<w:rPr>${runPropertiesParts.join('')}</w:rPr>`;
