@@ -637,9 +637,9 @@ app.post('/api/generate-weekly-lesson-plans', async (req, res) => {
       return res.status(400).json({ message: "Les données ou la semaine sont manquantes." });
     }
 
-    console.log(`Génération de ${data.length} plans de leçons pour la semaine ${week}`);
+    console.log(`🚀 Génération de ${data.length} plans de leçons IA pour la semaine ${week}`);
 
-    // Charger le modèle Word
+    // Charger le modèle Word une seule fois
     let templateBuffer;
     try {
       const response = await fetch(lessonTemplateUrl);
@@ -658,11 +658,168 @@ app.post('/api/generate-weekly-lesson-plans', async (req, res) => {
 
     archive.pipe(res);
 
-    // Ajouter un fichier de test pour vérifier que le ZIP fonctionne
-    archive.append('Plans de leçons générés pour la semaine ' + week, { name: 'info.txt' });
+    // Créer un fichier info
+    const infoContent = `Plans de leçons générés pour la semaine ${week}\nNombre total: ${data.length}\nGénéré le: ${new Date().toLocaleString('fr-FR')}\n`;
+    archive.append(infoContent, { name: 'INFO.txt' });
+
+    // Générer chaque plan de leçon individuellement
+    const MODEL_NAME = "gemini-2.5-flash";
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+    
+    const weekNumber = Number(week);
+    const datesNode = specificWeekDateRangesNode[weekNumber];
+    
+    const jsonStructure = `{"TitreUnite":"un titre d'unité pertinent pour la leçon","Methodes":"liste des méthodes d'enseignement","Outils":"liste des outils de travail","Objectifs":"une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\\\n). Commence chaque objectif par un tiret (-).","etapes":[{"phase":"Introduction","duree":"5 min","activite":"Description de l'activité d'introduction pour l'enseignant et les élèves."},{"phase":"Activité Principale","duree":"25 min","activite":"Description de l'activité principale, en intégrant les 'travaux de classe' et le 'support' si possible."},{"phase":"Synthèse","duree":"10 min","activite":"Description de l'activité de conclusion et de vérification des acquis."},{"phase":"Clôture","duree":"5 min","activite":"Résumé rapide et annonce des devoirs."}],"Ressources":"les ressources spécifiques à utiliser.","Devoirs":"une suggestion de devoirs.","DiffLents":"une suggestion pour aider les apprenants en difficulté.","DiffTresPerf":"une suggestion pour stimuler les apprenants très performants.","DiffTous":"une suggestion de différenciation pour toute la classe."}`;
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < data.length; i++) {
+      try {
+        const rowData = data[i];
+        console.log(`📝 Génération du plan ${i + 1}/${data.length}...`);
+
+        // Extraire les données
+        const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
+        const classe = rowData[findKey(rowData, 'Classe')] || '';
+        const matiere = rowData[findKey(rowData, 'Matière')] || '';
+        const lecon = rowData[findKey(rowData, 'Leçon')] || '';
+        const jour = rowData[findKey(rowData, 'Jour')] || '';
+        const seance = rowData[findKey(rowData, 'Période')] || '';
+        const support = rowData[findKey(rowData, 'Support')] || 'Non spécifié';
+        const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
+        const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
+
+        // Date formatée
+        let formattedDate = "";
+        if (jour && datesNode?.start) {
+          const weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
+          if (!isNaN(weekStartDateNode.getTime())) {
+            const dateOfDay = getDateForDayNameNode(weekStartDateNode, jour);
+            if (dateOfDay) formattedDate = formatDateFrenchNode(dateOfDay);
+          }
+        }
+
+        // Créer le prompt selon la langue de l'enseignant
+        let prompt;
+        if (englishTeachers.includes(enseignant)) {
+          prompt = `As an expert pedagogical assistant, create a detailed 45-minute lesson plan in English. Structure the lesson into timed phases. Intelligently integrate the teacher's existing notes:
+- Subject: ${matiere}, Class: ${classe}, Lesson Topic: ${lecon}
+- Planned Classwork: ${travaux}
+- Mentioned Support/Materials: ${support}
+- Planned Homework: ${devoirsPrevus}
+Generate a response in valid JSON format only. Use the following JSON structure with professional and concrete values in English: ${jsonStructure}`;
+        } else if (arabicTeachers.includes(enseignant)) {
+          prompt = `بصفتك مساعدًا تربويًا خبيرًا، قم بإنشاء خطة درس مفصلة باللغة العربية مدتها 45 دقيقة. قم ببناء الدرس في مراحل محددة بوقت. ادمج بذكاء ملاحظات المعلم الحالية:
+- المادة: ${matiere}, الفصل: ${classe}, موضوع الدرس: ${lecon}
+- عمل الفصل المخطط له: ${travaux}
+- الدعم / المواد المذكورة: ${support}
+- الواجبات المخطط لها: ${devoirsPrevus}
+قم بإنشاء استجابة بتنسيق JSON صالح فقط. يجب استعمال البنية التالية بقيم مهنية وملموسة (المفاتيح بالإنجليزية): ${jsonStructure}`;
+        } else {
+          prompt = `En tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure la leçon en phases chronométrées. Intègre intelligemment les notes existantes de l'enseignant :
+- Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}
+- Travaux de classe prévus : ${travaux}
+- Support/Matériel mentionné : ${support}
+- Devoirs prévus : ${devoirsPrevus}
+Génère une réponse au format JSON valide uniquement selon la structure suivante (valeurs concrètes et professionnelles en français) : ${jsonStructure}`;
+        }
+
+        // Appeler l'API Gemini
+        const requestBody = {
+          contents: [{ role: "user", parts: [{ text: prompt }]}],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
+        };
+
+        const aiResponse = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!aiResponse.ok) {
+          const errorBody = await aiResponse.json().catch(() => ({}));
+          console.error(`❌ Erreur API Gemini pour plan ${i + 1}:`, errorBody);
+          errorCount++;
+          continue; // Passer au suivant
+        }
+
+        const aiResult = await aiResponse.json();
+        const text = aiResult?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+        let aiData;
+        try {
+          aiData = JSON.parse(text);
+        } catch (e) {
+          console.error(`❌ Erreur parsing JSON pour plan ${i + 1}:`, text);
+          errorCount++;
+          continue;
+        }
+
+        // Générer le document Word
+        const zip = new PizZip(templateBuffer);
+        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
+
+        let minutageString = "";
+        let contenuString = "";
+        if (aiData.etapes && Array.isArray(aiData.etapes)) {
+          minutageString = aiData.etapes.map(e => e.duree || "").join('\n');
+          contenuString = aiData.etapes.map(e => `▶ ${e.phase || ""}:\n${e.activite || ""}`).join('\n\n');
+        }
+
+        const templateData = {
+          ...aiData,
+          Semaine: week,
+          Lecon: lecon,
+          Matiere: matiere,
+          Classe: classe,
+          Jour: jour,
+          Seance: seance,
+          NomEnseignant: enseignant,
+          Date: formattedDate,
+          Deroulement: minutageString,
+          Contenu: contenuString,
+        };
+
+        doc.render(templateData);
+        const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+
+        // Créer un nom de fichier sécurisé
+        const sanitizeForFilename = (str) => {
+          if (typeof str !== 'string') str = String(str);
+          const normalized = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          return normalized
+            .replace(/\s+/g, '-')
+            .replace(/[^a-zA-Z0-9-]/g, '_')
+            .replace(/__+/g, '_');
+        };
+
+        const filename = `Plan_${i + 1}_${sanitizeForFilename(classe)}_${sanitizeForFilename(matiere)}_${sanitizeForFilename(seance)}.docx`;
+        
+        // Ajouter au ZIP
+        archive.append(buf, { name: filename });
+        successCount++;
+        console.log(`✅ Plan ${i + 1}/${data.length} généré: ${filename}`);
+
+      } catch (error) {
+        console.error(`❌ Erreur génération plan ${i + 1}:`, error);
+        errorCount++;
+      }
+    }
+
+    // Ajouter un résumé
+    const summaryContent = `Résumé de génération
+======================
+Total demandés: ${data.length}
+Succès: ${successCount}
+Erreurs: ${errorCount}
+Génération terminée le: ${new Date().toLocaleString('fr-FR')}
+`;
+    archive.append(summaryContent, { name: 'RESUME.txt' });
 
     await archive.finalize();
-    console.log('Archive ZIP finalisée et envoyée.');
+    console.log(`✅ Archive ZIP finalisée: ${successCount} plans générés, ${errorCount} erreurs`);
     
   } catch (error) {
     console.error('❌ Erreur serveur /generate-weekly-lesson-plans:', error);
