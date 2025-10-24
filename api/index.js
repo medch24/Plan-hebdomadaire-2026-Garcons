@@ -618,6 +618,61 @@ Génère une réponse au format JSON valide uniquement selon la structure suivan
   }
 });
 
+// --------------------- Génération IA Hebdomadaire (plans multiples) --------------------
+
+app.post('/api/generate-weekly-lesson-plans', async (req, res) => {
+  try {
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) {
+      return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });
+    }
+
+    const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL;
+    if (!lessonTemplateUrl) {
+      return res.status(503).json({ message: "L'URL du modèle de leçon Word n'est pas configurée." });
+    }
+
+    const { week, data } = req.body;
+    if (!data || !Array.isArray(data) || data.length === 0 || !week) {
+      return res.status(400).json({ message: "Les données ou la semaine sont manquantes." });
+    }
+
+    console.log(`Génération de ${data.length} plans de leçons pour la semaine ${week}`);
+
+    // Charger le modèle Word
+    let templateBuffer;
+    try {
+      const response = await fetch(lessonTemplateUrl);
+      if (!response.ok) throw new Error(`Échec du téléchargement du modèle Word (${response.status})`);
+      templateBuffer = Buffer.from(await response.arrayBuffer());
+    } catch (e) {
+      console.error("Erreur de récupération du modèle Word:", e);
+      return res.status(500).json({ message: "Impossible de récupérer le modèle de leçon depuis l'URL fournie." });
+    }
+
+    const archiver = require('archiver');
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="Plans_Lecons_Semaine_${week}.zip"`);
+
+    archive.pipe(res);
+
+    // Ajouter un fichier de test pour vérifier que le ZIP fonctionne
+    archive.append('Plans de leçons générés pour la semaine ' + week, { name: 'info.txt' });
+
+    await archive.finalize();
+    console.log('Archive ZIP finalisée et envoyée.');
+    
+  } catch (error) {
+    console.error('❌ Erreur serveur /generate-weekly-lesson-plans:', error);
+    if (!res.headersSent) {
+      const errorMessage = error.message || "Erreur interne.";
+      res.status(500).json({ message: `Erreur interne lors de la génération hebdomadaire: ${errorMessage}` });
+    }
+  }
+});
+
 // Démarrer le serveur seulement si ce fichier est exécuté directement
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
@@ -627,6 +682,4 @@ if (require.main === module) {
   });
 }
 
-
-// --------------------- Génération IA Hebdomadaire (plans multiples) --------------------\n\napp.post("/api/generate-weekly-lesson-plans", async (req, res) => {\n  try {\n    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;\n    if (!GEMINI_API_KEY) {\n      return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });\n    }\n\n    const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL;\n    if (!lessonTemplateUrl) {\n      return res.status(503).json({ message: "L'URL du modèle de leçon Word n'est pas configurée." });\n    }\n\n    const { week, data } = req.body;\n    if (!data || !Array.isArray(data) || data.length === 0 || !week) {\n      return res.status(400).json({ message: "Les données ou la semaine sont manquantes." });\n    }\n\n    console.log(`Génération de ${data.length} plans de leçons pour la semaine ${week}`);\n\n    // Charger le modèle Word\n    let templateBuffer;\n    try {\n      const response = await fetch(lessonTemplateUrl);\n      if (!response.ok) throw new Error(`Échec du téléchargement du modèle Word (${response.status})`);\n      templateBuffer = Buffer.from(await response.arrayBuffer());\n    } catch (e) {\n      console.error("Erreur de récupération du modèle Word:", e);\n      return res.status(500).json({ message: "Impossible de récupérer le modèle de leçon depuis l'URL fournie." });\n    }\n\n    const archiver = require("archiver");\n    const archive = archiver("zip", { zlib: { level: 9 } });\n\n    res.setHeader("Content-Type", "application/zip");\n    res.setHeader("Content-Disposition", `attachment; filename="Plans_Lecons_Semaine_${week}.zip"`);\n\n    archive.pipe(res);\n\n    // Ajouter un fichier de test pour vérifier que le ZIP fonctionne\n    archive.append("Plans de leçons générés pour la semaine " + week, { name: "info.txt" });\n\n    await archive.finalize();\n    \n  } catch (error) {\n    console.error("❌ Erreur serveur /generate-weekly-lesson-plans:", error);\n    if (!res.headersSent) {\n      const errorMessage = error.message || "Erreur interne.";\n      res.status(500).json({ message: `Erreur interne lors de la génération hebdomadaire: ${errorMessage}` });\n    }\n  }\n});
 module.exports = app;
