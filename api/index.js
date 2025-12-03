@@ -369,11 +369,12 @@ app.post('/api/generate-excel-workbook', async (req, res) => {
         const itemKey = findKey(item, header);
         let value = itemKey ? item[itemKey] : '';
         
-        // Formater la colonne "Jour" avec le format complet (ex: Mercredi 03 Décembre 2025)
+        // Pour la colonne "Jour", stocker l'objet Date au lieu du texte
         if (header === 'Jour' && value && weekStartDateNode && !isNaN(weekStartDateNode.getTime())) {
           const dateOfDay = getDateForDayNameNode(weekStartDateNode, value);
           if (dateOfDay) {
-            value = formatDateFrenchNode(dateOfDay);
+            // Stocker l'objet Date JavaScript pour Excel
+            value = dateOfDay;
           }
         }
         
@@ -384,10 +385,27 @@ app.post('/api/generate-excel-workbook', async (req, res) => {
 
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.json_to_sheet(formattedData, { header: finalHeaders });
+    
+    // Définir les largeurs de colonnes
     worksheet['!cols'] = [
-      { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 20 },
+      { wch: 20 }, { wch: 25 }, { wch: 10 }, { wch: 12 }, { wch: 20 },
       { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 45 }
     ];
+    
+    // Appliquer le format de date français à la colonne "Jour" (colonne B)
+    // Format Excel : "dddd dd mmmm yyyy" = "Mercredi 03 Décembre 2025"
+    const dateFormat = 'dddd dd mmmm yyyy';
+    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+    
+    // Parcourir toutes les lignes de la colonne "Jour" (colonne B = index 1)
+    for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: rowNum, c: 1 }); // colonne B (index 1)
+      const cell = worksheet[cellAddress];
+      if (cell && cell.t === 'n') { // Si c'est un nombre (date Excel)
+        cell.z = dateFormat; // Appliquer le format de date
+      }
+    }
+    
     XLSX.utils.book_append_sheet(workbook, worksheet, `Plan S${weekNumber}`);
 
     const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
