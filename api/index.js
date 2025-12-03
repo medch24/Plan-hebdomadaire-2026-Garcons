@@ -82,7 +82,7 @@ const specificWeekDateRangesNode = {
 const validUsers = {
   "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Imad": "Imad", "Kamel": "Kamel",
   "Majed": "Majed", "Mohamed Ali": "Mohamed Ali", "Morched": "Morched",
-  "Saeed": "Saeed", "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga", "Oumarou": "Oumarou", "Zine": "Zine"
+  "Saeed": "Saeed", "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga", "Oumarou": "Oumarou", "Zine": "Zine", "Youssouf": "Youssouf"
 };
 
 let cachedDb = null;
@@ -355,11 +355,29 @@ app.post('/api/generate-excel-workbook', async (req, res) => {
     if (!planDocument?.data?.length) return res.status(404).json({ message: `Aucune donnée pour S${weekNumber}.` });
 
     const finalHeaders = [ 'Enseignant', 'Jour', 'Période', 'Classe', 'Matière', 'Leçon', 'Travaux de classe', 'Support', 'Devoirs' ];
+    
+    // Récupérer la date de début de la semaine pour formater les jours
+    const datesNode = specificWeekDateRangesNode[weekNumber];
+    let weekStartDateNode = null;
+    if (datesNode?.start) {
+      weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
+    }
+    
     const formattedData = planDocument.data.map(item => {
       const row = {};
       finalHeaders.forEach(header => {
         const itemKey = findKey(item, header);
-        row[header] = itemKey ? item[itemKey] : '';
+        let value = itemKey ? item[itemKey] : '';
+        
+        // Formater la colonne "Jour" avec le format complet (ex: Mercredi 03 Décembre 2025)
+        if (header === 'Jour' && value && weekStartDateNode && !isNaN(weekStartDateNode.getTime())) {
+          const dateOfDay = getDateForDayNameNode(weekStartDateNode, value);
+          if (dateOfDay) {
+            value = formatDateFrenchNode(dateOfDay);
+          }
+        }
+        
+        row[header] = value;
       });
       return row;
     });
