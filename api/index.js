@@ -118,6 +118,59 @@ function getDateForDayNameNode(weekStartDate, dayName) {
   specificDate.setUTCDate(specificDate.getUTCDate() + offset);
   return specificDate;
 }
+
+// Fonction robuste pour parser les dates dans tous les formats (côté serveur)
+function parseDateFromJourValue(jourValue, weekStartDate) {
+  if (!jourValue) return null;
+  
+  const trimmed = String(jourValue).trim();
+  
+  // Format 1: Juste le nom du jour (ex: "Dimanche", "Lundi")
+  const dayMapFr = {"Dimanche":0, "Lundi":1, "Mardi":2, "Mercredi":3, "Jeudi":4, "Vendredi":5, "Samedi":6};
+  if (dayMapFr.hasOwnProperty(trimmed)) {
+    return { dayName: trimmed, date: getDateForDayNameNode(weekStartDate, trimmed) };
+  }
+  
+  // Format 2: Date complète française (ex: "Dimanche 30 Novembre 2025")
+  const frenchDateRegex = /^(Dimanche|Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi)\s+(\d{1,2})\s+(Janvier|Février|Mars|Avril|Mai|Juin|Juillet|Août|Septembre|Octobre|Novembre|Décembre)\s+(\d{4})$/i;
+  const frenchMatch = trimmed.match(frenchDateRegex);
+  if (frenchMatch) {
+    const dayName = frenchMatch[1];
+    const day = parseInt(frenchMatch[2], 10);
+    const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+    const month = monthNames.findIndex(m => m.toLowerCase() === frenchMatch[3].toLowerCase());
+    const year = parseInt(frenchMatch[4], 10);
+    if (month !== -1) {
+      return { dayName: dayName, date: new Date(Date.UTC(year, month, day)) };
+    }
+  }
+  
+  // Format 3: Date ISO (ex: "2025-11-30")
+  const isoRegex = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const isoMatch = trimmed.match(isoRegex);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+    const date = new Date(Date.UTC(year, month, day));
+    const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+    return { dayName: dayNames[date.getUTCDay()], date: date };
+  }
+  
+  // Format 4: Date DD/MM/YYYY ou DD-MM-YYYY
+  const dmyRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/;
+  const dmyMatch = trimmed.match(dmyRegex);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10) - 1;
+    const year = parseInt(dmyMatch[3], 10);
+    const date = new Date(Date.UTC(year, month, day));
+    const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+    return { dayName: dayNames[date.getUTCDay()], date: date };
+  }
+  
+  return null;
+}
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
 
 // ------------------------- Auth & CRUD simples -------------------------
@@ -286,16 +339,24 @@ app.post('/api/generate-word', async (req, res) => {
 
     data.forEach(item => {
       const day = item[jourKey];
-      if (day && dayOrder.includes(day)) {
-        if (!groupedByDay[day]) groupedByDay[day] = [];
-        groupedByDay[day].push(item);
+      if (day) {
+        const parsed = parseDateFromJourValue(day, weekStartDateNode);
+        if (parsed && parsed.dayName) {
+          const dayName = parsed.dayName;
+          if (!groupedByDay[dayName]) groupedByDay[dayName] = [];
+          groupedByDay[dayName].push(item);
+        }
       }
     });
+
+    // Debug: Log pour voir le groupement par jour
+    console.log('📅 Grouped by day:', Object.keys(groupedByDay).map(day => `${day}: ${groupedByDay[day].length} items`).join(', '));
 
     const joursData = dayOrder.map(dayName => {
       if (!groupedByDay[dayName]) return null;
 
-      const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
+      const parsed = parseDateFromJourValue(dayName, weekStartDateNode);
+      const dateOfDay = parsed ? parsed.date : getDateForDayNameNode(weekStartDateNode, dayName);
       const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
       const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
 
@@ -326,6 +387,15 @@ app.post('/api/generate-word', async (req, res) => {
       notes: formatTextForWord(notes),
       plageSemaine: plageSemaineText
     };
+
+    // Debug: Log pour vérifier les données envoyées au template
+    console.log('📊 Template Data:', JSON.stringify({
+      semaine: templateData.semaine,
+      classe: templateData.classe,
+      joursCount: templateData.jours.length,
+      jours: templateData.jours.map(j => ({ jourDateComplete: j.jourDateComplete, matieresCount: j.matieres.length })),
+      plageSemaine: templateData.plageSemaine
+    }, null, 2));
 
     doc.render(templateData);
 
@@ -369,11 +439,12 @@ app.post('/api/generate-excel-workbook', async (req, res) => {
         const itemKey = findKey(item, header);
         let value = itemKey ? item[itemKey] : '';
         
-        // Formater la colonne "Jour" avec le format complet (ex: Mercredi 03 Décembre 2025)
+        // Pour la colonne "Jour", stocker l'objet Date au lieu du texte
         if (header === 'Jour' && value && weekStartDateNode && !isNaN(weekStartDateNode.getTime())) {
           const dateOfDay = getDateForDayNameNode(weekStartDateNode, value);
           if (dateOfDay) {
-            value = formatDateFrenchNode(dateOfDay);
+            // Stocker l'objet Date JavaScript pour Excel
+            value = dateOfDay;
           }
         }
         
@@ -384,10 +455,27 @@ app.post('/api/generate-excel-workbook', async (req, res) => {
 
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.json_to_sheet(formattedData, { header: finalHeaders });
+    
+    // Définir les largeurs de colonnes
     worksheet['!cols'] = [
-      { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 20 },
+      { wch: 20 }, { wch: 25 }, { wch: 10 }, { wch: 12 }, { wch: 20 },
       { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 45 }
     ];
+    
+    // Appliquer le format de date français à la colonne "Jour" (colonne B)
+    // Format Excel : "dddd dd mmmm yyyy" = "Mercredi 03 Décembre 2025"
+    const dateFormat = 'dddd dd mmmm yyyy';
+    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+    
+    // Parcourir toutes les lignes de la colonne "Jour" (colonne B = index 1)
+    for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: rowNum, c: 1 }); // colonne B (index 1)
+      const cell = worksheet[cellAddress];
+      if (cell && cell.t === 'n') { // Si c'est un nombre (date Excel)
+        cell.z = dateFormat; // Appliquer le format de date
+      }
+    }
+    
     XLSX.utils.book_append_sheet(workbook, worksheet, `Plan S${weekNumber}`);
 
     const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });

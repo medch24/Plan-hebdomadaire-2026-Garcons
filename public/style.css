@@ -58,7 +58,9 @@ body::before {
     align-items: center;
     justify-content: center;
     min-height: 100vh;
+    width: 100%;
     padding: 20px;
+    position: relative;
 }
 
 #login-form > div:not(.password-container) {
@@ -67,8 +69,8 @@ body::before {
 
 #login-form .login-card {
     width: 100%;
-    max-width: 420px;
-    padding: 40px 30px;
+    max-width: 450px;
+    padding: 45px 35px;
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(10px);
     border-radius: var(--border-radius);
@@ -76,6 +78,8 @@ body::before {
     text-align: center;
     animation: slideInUp 0.6s var(--transition-bounce);
     border: 2px solid rgba(255, 255, 255, 0.3);
+    margin: auto;
+    position: relative;
 }
 
 @keyframes slideInUp {
