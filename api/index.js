@@ -9,6 +9,8 @@ const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
 const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
+const { Packer } = require('docx');
+const { createWeeklyPlanDocument } = require('./wordGenerator');
 
 // ========================================================================
 // ========= FONCTION D'AIDE POUR LA GÉNÉRATION WORD (VERSION FINALE) =====
@@ -301,21 +303,7 @@ app.post('/api/generate-word', async (req, res) => {
       return res.status(400).json({ message: 'Données invalides.' });
     }
 
-    let templateBuffer;
-    try {
-      const response = await fetch(WORD_TEMPLATE_URL);
-      if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
-      templateBuffer = Buffer.from(await response.arrayBuffer());
-    } catch (e) {
-      console.error("Erreur de récupération du modèle Word:", e);
-      return res.status(500).json({ message: `Erreur récup modèle Word.` });
-    }
-
-    const zip = new PizZip(templateBuffer);
-    const doc = new Docxtemplater(zip, {
-      paragraphLoop: true,
-      nullGetter: () => "",
-    });
+    console.log(`🔍 Génération Word pour S${weekNumber}, classe ${classe}, ${data.length} lignes de données`);
 
     const groupedByDay = {};
     const dayOrder = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
@@ -337,6 +325,7 @@ app.post('/api/generate-word', async (req, res) => {
           supportKey = findKey(sampleRow, 'Support'),
           devoirsKey = findKey(sampleRow, 'Devoirs');
 
+    // Grouper les données par jour
     data.forEach(item => {
       const day = item[jourKey];
       if (day) {
@@ -349,9 +338,9 @@ app.post('/api/generate-word', async (req, res) => {
       }
     });
 
-    // Debug: Log pour voir le groupement par jour
     console.log('📅 Grouped by day:', Object.keys(groupedByDay).map(day => `${day}: ${groupedByDay[day].length} items`).join(', '));
 
+    // Créer les données formatées pour chaque jour
     const joursData = dayOrder.map(dayName => {
       if (!groupedByDay[dayName]) return null;
 
@@ -362,15 +351,21 @@ app.post('/api/generate-word', async (req, res) => {
 
       const matieres = sortedEntries.map(item => ({
         matiere: item[matiereKey] ?? "",
-        Lecon: formatTextForWord(item[leconKey], { color: 'FF0000' }),
-        travailDeClasse: formatTextForWord(item[travauxKey]),
-        Support: formatTextForWord(item[supportKey], { color: 'FF0000', italic: true }),
-        devoirs: formatTextForWord(item[devoirsKey], { color: '0000FF' })
+        Lecon: item[leconKey] || "",
+        travailDeClasse: item[travauxKey] || "",
+        Support: item[supportKey] || "",
+        devoirs: item[devoirsKey] || ""
       }));
 
       return { jourDateComplete: formattedDate, matieres: matieres };
     }).filter(Boolean);
 
+    console.log(`📊 Jours formatés: ${joursData.length} jours avec données`);
+    joursData.forEach(j => {
+      console.log(`  - ${j.jourDateComplete}: ${j.matieres.length} matières`);
+    });
+
+    // Créer la plage de dates
     let plageSemaineText = `Semaine ${weekNumber}`;
     if (datesNode?.start && datesNode?.end) {
       const startD = new Date(datesNode.start + 'T00:00:00Z');
@@ -380,30 +375,26 @@ app.post('/api/generate-word', async (req, res) => {
       }
     }
 
-    const templateData = {
+    // Créer le document Word avec la nouvelle bibliothèque
+    const docData = {
       semaine: weekNumber,
       classe: classe,
       jours: joursData,
-      notes: formatTextForWord(notes),
+      notes: notes || "",
       plageSemaine: plageSemaineText
     };
 
-    // Debug: Log pour vérifier les données envoyées au template
-    console.log('📊 Template Data:', JSON.stringify({
-      semaine: templateData.semaine,
-      classe: templateData.classe,
-      joursCount: templateData.jours.length,
-      jours: templateData.jours.map(j => ({ jourDateComplete: j.jourDateComplete, matieresCount: j.matieres.length })),
-      plageSemaine: templateData.plageSemaine
-    }, null, 2));
-
-    doc.render(templateData);
-
-    const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+    const doc = createWeeklyPlanDocument(docData);
+    
+    // Générer le buffer du document
+    const buffer = await Packer.toBuffer(doc);
+    
     const filename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.send(buf);
+    res.send(buffer);
+
+    console.log(`✅ Document Word généré avec succès: ${filename}`);
 
   } catch (error) {
     console.error('❌ Erreur serveur /generate-word:', error);
