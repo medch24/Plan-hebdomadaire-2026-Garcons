@@ -349,6 +349,9 @@ app.post('/api/generate-word', async (req, res) => {
       }
     });
 
+    // Debug: Log pour voir le groupement par jour
+    console.log('📅 Grouped by day:', Object.keys(groupedByDay).map(day => `${day}: ${groupedByDay[day].length} items`).join(', '));
+
     const joursData = dayOrder.map(dayName => {
       if (!groupedByDay[dayName]) return null;
 
@@ -384,6 +387,15 @@ app.post('/api/generate-word', async (req, res) => {
       notes: formatTextForWord(notes),
       plageSemaine: plageSemaineText
     };
+
+    // Debug: Log pour vérifier les données envoyées au template
+    console.log('📊 Template Data:', JSON.stringify({
+      semaine: templateData.semaine,
+      classe: templateData.classe,
+      joursCount: templateData.jours.length,
+      jours: templateData.jours.map(j => ({ jourDateComplete: j.jourDateComplete, matieresCount: j.matieres.length })),
+      plageSemaine: templateData.plageSemaine
+    }, null, 2));
 
     doc.render(templateData);
 
