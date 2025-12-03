@@ -118,6 +118,59 @@ function getDateForDayNameNode(weekStartDate, dayName) {
   specificDate.setUTCDate(specificDate.getUTCDate() + offset);
   return specificDate;
 }
+
+// Fonction robuste pour parser les dates dans tous les formats (côté serveur)
+function parseDateFromJourValue(jourValue, weekStartDate) {
+  if (!jourValue) return null;
+  
+  const trimmed = String(jourValue).trim();
+  
+  // Format 1: Juste le nom du jour (ex: "Dimanche", "Lundi")
+  const dayMapFr = {"Dimanche":0, "Lundi":1, "Mardi":2, "Mercredi":3, "Jeudi":4, "Vendredi":5, "Samedi":6};
+  if (dayMapFr.hasOwnProperty(trimmed)) {
+    return { dayName: trimmed, date: getDateForDayNameNode(weekStartDate, trimmed) };
+  }
+  
+  // Format 2: Date complète française (ex: "Dimanche 30 Novembre 2025")
+  const frenchDateRegex = /^(Dimanche|Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi)\s+(\d{1,2})\s+(Janvier|Février|Mars|Avril|Mai|Juin|Juillet|Août|Septembre|Octobre|Novembre|Décembre)\s+(\d{4})$/i;
+  const frenchMatch = trimmed.match(frenchDateRegex);
+  if (frenchMatch) {
+    const dayName = frenchMatch[1];
+    const day = parseInt(frenchMatch[2], 10);
+    const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+    const month = monthNames.findIndex(m => m.toLowerCase() === frenchMatch[3].toLowerCase());
+    const year = parseInt(frenchMatch[4], 10);
+    if (month !== -1) {
+      return { dayName: dayName, date: new Date(Date.UTC(year, month, day)) };
+    }
+  }
+  
+  // Format 3: Date ISO (ex: "2025-11-30")
+  const isoRegex = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const isoMatch = trimmed.match(isoRegex);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+    const date = new Date(Date.UTC(year, month, day));
+    const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+    return { dayName: dayNames[date.getUTCDay()], date: date };
+  }
+  
+  // Format 4: Date DD/MM/YYYY ou DD-MM-YYYY
+  const dmyRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/;
+  const dmyMatch = trimmed.match(dmyRegex);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10) - 1;
+    const year = parseInt(dmyMatch[3], 10);
+    const date = new Date(Date.UTC(year, month, day));
+    const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+    return { dayName: dayNames[date.getUTCDay()], date: date };
+  }
+  
+  return null;
+}
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
 
 // ------------------------- Auth & CRUD simples -------------------------
@@ -286,16 +339,21 @@ app.post('/api/generate-word', async (req, res) => {
 
     data.forEach(item => {
       const day = item[jourKey];
-      if (day && dayOrder.includes(day)) {
-        if (!groupedByDay[day]) groupedByDay[day] = [];
-        groupedByDay[day].push(item);
+      if (day) {
+        const parsed = parseDateFromJourValue(day, weekStartDateNode);
+        if (parsed && parsed.dayName) {
+          const dayName = parsed.dayName;
+          if (!groupedByDay[dayName]) groupedByDay[dayName] = [];
+          groupedByDay[dayName].push(item);
+        }
       }
     });
 
     const joursData = dayOrder.map(dayName => {
       if (!groupedByDay[dayName]) return null;
 
-      const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
+      const parsed = parseDateFromJourValue(dayName, weekStartDateNode);
+      const dateOfDay = parsed ? parsed.date : getDateForDayNameNode(weekStartDateNode, dayName);
       const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
       const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
 
