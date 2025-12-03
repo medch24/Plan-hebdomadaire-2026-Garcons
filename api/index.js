@@ -303,6 +303,16 @@ app.post('/api/generate-word', async (req, res) => {
     }
 
     console.log(`🔍 Génération Word pour S${weekNumber}, classe ${classe}, ${data.length} lignes de données`);
+    
+    // Debug: Afficher les premières lignes de données
+    if (data.length > 0) {
+      console.log('📋 Exemple de données reçues:');
+      console.log('  Premier élément:', JSON.stringify(data[0], null, 2));
+      console.log('  Clés disponibles:', Object.keys(data[0]));
+    } else {
+      console.log('⚠️ ATTENTION: Aucune donnée reçue !');
+      return res.status(400).json({ message: 'Aucune donnée à générer.' });
+    }
 
     // Charger le template Word local (nettoyé)
     let templateBuffer;
@@ -351,9 +361,13 @@ app.post('/api/generate-word', async (req, res) => {
           travauxKey = findKey(sampleRow, 'Travaux de classe'),
           supportKey = findKey(sampleRow, 'Support'),
           devoirsKey = findKey(sampleRow, 'Devoirs');
+    
+    console.log('🔑 Clés identifiées:', { jourKey, periodeKey, matiereKey, leconKey, travauxKey, supportKey, devoirsKey });
 
     // Grouper les données par jour
-    data.forEach(item => {
+    let itemsProcessed = 0;
+    let itemsSkipped = 0;
+    data.forEach((item, index) => {
       const day = item[jourKey];
       if (day) {
         const parsed = parseDateFromJourValue(day, weekStartDateNode);
@@ -361,11 +375,23 @@ app.post('/api/generate-word', async (req, res) => {
           const dayName = parsed.dayName;
           if (!groupedByDay[dayName]) groupedByDay[dayName] = [];
           groupedByDay[dayName].push(item);
+          itemsProcessed++;
+        } else {
+          itemsSkipped++;
+          if (index < 3) {
+            console.log(`⚠️ Ligne ${index}: Jour "${day}" non parsé`);
+          }
+        }
+      } else {
+        itemsSkipped++;
+        if (index < 3) {
+          console.log(`⚠️ Ligne ${index}: Pas de jour (jourKey=${jourKey})`);
         }
       }
     });
 
-    console.log('📅 Grouped by day:', Object.keys(groupedByDay).map(day => `${day}: ${groupedByDay[day].length} items`).join(', '));
+    console.log(`📊 Traitement: ${itemsProcessed} éléments groupés, ${itemsSkipped} ignorés`);
+    console.log('📅 Grouped by day:', Object.keys(groupedByDay).length ? Object.keys(groupedByDay).map(day => `${day}: ${groupedByDay[day].length} items`).join(', ') : 'AUCUN JOUR TROUVÉ!');
 
     // Créer les données formatées pour chaque jour
     const joursData = dayOrder.map(dayName => {
@@ -389,9 +415,15 @@ app.post('/api/generate-word', async (req, res) => {
     }).filter(Boolean);
 
     console.log(`📊 Jours formatés: ${joursData.length} jours avec données`);
-    joursData.forEach(j => {
-      console.log(`  - ${j.jourDateComplete}: ${j.matieres.length} matières`);
-    });
+    if (joursData.length === 0) {
+      console.log('❌ ERREUR: Aucun jour formaté ! Les données ne seront pas affichées dans le Word.');
+      console.log('   dayOrder:', dayOrder);
+      console.log('   groupedByDay keys:', Object.keys(groupedByDay));
+    } else {
+      joursData.forEach(j => {
+        console.log(`  - ${j.jourDateComplete}: ${j.matieres.length} matières`);
+      });
+    }
 
     // Créer la plage de dates
     let plageSemaineText = `Semaine ${weekNumber}`;
