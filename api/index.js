@@ -2,6 +2,7 @@
 
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
 const XLSX = require('xlsx');
@@ -303,16 +304,24 @@ app.post('/api/generate-word', async (req, res) => {
 
     console.log(`🔍 Génération Word pour S${weekNumber}, classe ${classe}, ${data.length} lignes de données`);
 
-    // Télécharger le template Word
+    // Charger le template Word local (nettoyé)
     let templateBuffer;
     try {
-      const response = await fetch(WORD_TEMPLATE_URL);
-      if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
-      templateBuffer = Buffer.from(await response.arrayBuffer());
-      console.log('✅ Template Word téléchargé');
+      const templatePath = path.join(__dirname, '../public/plan_template.docx');
+      templateBuffer = fs.readFileSync(templatePath);
+      console.log('✅ Template Word local chargé:', templatePath);
     } catch (e) {
-      console.error("❌ Erreur de récupération du modèle Word:", e);
-      return res.status(500).json({ message: `Erreur récup modèle Word.` });
+      console.error("❌ Erreur de lecture du template local:", e);
+      // Fallback: essayer de télécharger depuis l'URL
+      try {
+        const response = await fetch(WORD_TEMPLATE_URL);
+        if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
+        templateBuffer = Buffer.from(await response.arrayBuffer());
+        console.log('✅ Template Word téléchargé depuis URL de fallback');
+      } catch (e2) {
+        console.error("❌ Erreur de récupération du modèle Word:", e2);
+        return res.status(500).json({ message: `Erreur récup modèle Word.` });
+      }
     }
 
     // Initialiser Docxtemplater
