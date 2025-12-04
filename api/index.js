@@ -2,6 +2,7 @@
 
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
 const XLSX = require('xlsx');
@@ -39,8 +40,12 @@ const formatTextForWord = (text, options = {}) => {
 
   let paragraphProperties = '';
   if (containsArabic(text)) {
-    paragraphProperties = '<w:pPr><w:jc w:val="right"/><w:bidi/></w:pPr>';
-    runPropertiesParts.push('<w:rtl/>');
+    // Police Arial 12pt, orientation RTL, centré
+    paragraphProperties = '<w:pPr><w:jc w:val="center"/><w:bidi w:val="1"/><w:textDirection w:val="rl"/></w:pPr>';
+    runPropertiesParts[0] = '<w:sz w:val="24"/><w:szCs w:val="24"/>'; // 12pt = 24 half-points
+    runPropertiesParts.push('<w:rtl w:val="1"/>');
+    runPropertiesParts.push('<w:cs/>'); // Complex script pour l'arabe
+    runPropertiesParts.push('<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>');
   }
 
   const runProperties = `<w:rPr>${runPropertiesParts.join('')}</w:rPr>`;
@@ -61,12 +66,15 @@ app.use(fileUpload());
 app.use(express.static(path.join(__dirname, '../public')));
 
 const MONGO_URL = process.env.MONGO_URL;
-const WORD_TEMPLATE_URL = process.env.WORD_TEMPLATE_URL;
+const WORD_TEMPLATE_URL = process.env.WORD_TEMPLATE_URL || 'https://docs.google.com/document/d/1E4JZY34Mbk7cE4E8Yu3dzG8zJIiraGDJ/export?format=docx';
 const LESSON_TEMPLATE_URL = process.env.LESSON_TEMPLATE_URL;
 
 const arabicTeachers = ['Majed', 'Jaber', 'Imad', 'Saeed'];
 const englishTeachers = ['Kamel'];
 
+// School week date ranges: Sunday (Dimanche) to Thursday (Jeudi) - 5 days per week
+// Start date MUST be Sunday, End date MUST be Thursday
+// Format: YYYY-MM-DD (ISO 8601)
 const specificWeekDateRangesNode = {
   1:{start:'2025-08-31',end:'2025-09-04'}, 2:{start:'2025-09-07',end:'2025-09-11'}, 3:{start:'2025-09-14',end:'2025-09-18'}, 4:{start:'2025-09-21',end:'2025-09-25'}, 5:{start:'2025-09-28',end:'2025-10-02'}, 6:{start:'2025-10-05',end:'2025-10-09'}, 7:{start:'2025-10-12',end:'2025-10-16'}, 8:{start:'2025-10-19',end:'2025-10-23'}, 9:{start:'2025-10-26',end:'2025-10-30'},10:{start:'2025-11-02',end:'2025-11-06'},
   11:{start:'2025-11-09',end:'2025-11-13'},12:{start:'2025-11-16',end:'2025-11-20'}, 13:{start:'2025-11-23',end:'2025-11-27'},14:{start:'2025-11-30',end:'2025-12-04'}, 15:{start:'2025-12-07',end:'2025-12-11'},16:{start:'2025-12-14',end:'2025-12-18'}, 17:{start:'2025-12-21',end:'2025-12-25'},18:{start:'2025-12-28',end:'2026-01-01'}, 19:{start:'2026-01-04',end:'2026-01-08'},20:{start:'2026-01-11',end:'2026-01-15'},
@@ -78,7 +86,7 @@ const specificWeekDateRangesNode = {
 const validUsers = {
   "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Imad": "Imad", "Kamel": "Kamel",
   "Majed": "Majed", "Mohamed Ali": "Mohamed Ali", "Morched": "Morched",
-  "Saeed": "Saeed", "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga", "Oumarou": "Oumarou", "Zine": "Zine"
+  "Saeed": "Saeed", "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga", "Oumarou": "Oumarou", "Zine": "Zine", "Youssouf": "Youssouf"
 };
 
 let cachedDb = null;
@@ -96,6 +104,13 @@ function formatDateFrenchNode(date) {
   const days = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
   const months = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
   const dayName = days[date.getUTCDay()];
+  
+  // Validate: School week is Sunday to Thursday only (no Friday/Saturday)
+  if (date.getUTCDay() === 5 || date.getUTCDay() === 6) {
+    console.warn(`⚠️ Invalid school day detected: ${dayName}`);
+    return "Date invalide (jour non scolaire)";
+  }
+  
   const dayNum = String(date.getUTCDate()).padStart(2, '0');
   const monthName = months[date.getUTCMonth()];
   const yearNum = date.getUTCFullYear();
@@ -103,18 +118,271 @@ function formatDateFrenchNode(date) {
 }
 function getDateForDayNameNode(weekStartDate, dayName) {
   if (!weekStartDate || isNaN(weekStartDate.getTime())) return null;
+  
+  // School week: Sunday (Dimanche) to Thursday (Jeudi) only - 5 days
   const dayOrder = { "Dimanche": 0, "Lundi": 1, "Mardi": 2, "Mercredi": 3, "Jeudi": 4 };
   const offset = dayOrder[dayName];
-  if (offset === undefined) return null;
+  
+  if (offset === undefined) {
+    console.warn(`⚠️ Invalid day name: ${dayName}. Only Dimanche-Jeudi are valid.`);
+    return null;
+  }
+  
   const specificDate = new Date(Date.UTC(
     weekStartDate.getUTCFullYear(),
     weekStartDate.getUTCMonth(),
     weekStartDate.getUTCDate()
   ));
   specificDate.setUTCDate(specificDate.getUTCDate() + offset);
+  
+  // Double-check: ensure we don't accidentally generate Friday or Saturday
+  if (specificDate.getUTCDay() === 5 || specificDate.getUTCDay() === 6) {
+    console.error(`❌ ERROR: Generated invalid school day (${specificDate.getUTCDay()})`);
+    return null;
+  }
+  
   return specificDate;
 }
+
+// Fonction robuste pour parser les dates dans tous les formats (côté serveur)
+function parseDateFromJourValue(jourValue, weekStartDate) {
+  if (!jourValue) return null;
+  
+  const trimmed = String(jourValue).trim();
+  
+  // Format 1: Juste le nom du jour (ex: "Dimanche", "Lundi")
+  // School week: Sunday to Thursday only (5 days)
+  const dayMapFr = {"Dimanche":0, "Lundi":1, "Mardi":2, "Mercredi":3, "Jeudi":4};
+  if (dayMapFr.hasOwnProperty(trimmed)) {
+    const date = getDateForDayNameNode(weekStartDate, trimmed);
+    if (!date) {
+      console.warn(`⚠️ Failed to generate date for day: ${trimmed}`);
+      return null;
+    }
+    return { dayName: trimmed, date: date };
+  }
+  
+  // Reject Friday and Saturday explicitly
+  if (trimmed === "Vendredi" || trimmed === "Samedi") {
+    console.warn(`⚠️ Invalid school day rejected: ${trimmed}`);
+    return null;
+  }
+  
+  // Format 2: Date complète française (ex: "Dimanche 30 Novembre 2025")
+  // School week: Only Dimanche (Sunday) to Jeudi (Thursday)
+  const frenchDateRegex = /^(Dimanche|Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi)\s+(\d{1,2})\s+(Janvier|Février|Mars|Avril|Mai|Juin|Juillet|Août|Septembre|Octobre|Novembre|Décembre)\s+(\d{4})$/i;
+  const frenchMatch = trimmed.match(frenchDateRegex);
+  if (frenchMatch) {
+    const dayName = frenchMatch[1];
+    
+    // Reject non-school days
+    if (dayName === "Vendredi" || dayName === "Samedi") {
+      console.warn(`⚠️ Invalid school day in date string: ${dayName}`);
+      return null;
+    }
+    
+    const day = parseInt(frenchMatch[2], 10);
+    const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+    const month = monthNames.findIndex(m => m.toLowerCase() === frenchMatch[3].toLowerCase());
+    const year = parseInt(frenchMatch[4], 10);
+    if (month !== -1) {
+      const date = new Date(Date.UTC(year, month, day));
+      // Verify the day of week matches
+      const actualDayOfWeek = date.getUTCDay();
+      const expectedDayMap = {"Dimanche":0, "Lundi":1, "Mardi":2, "Mercredi":3, "Jeudi":4};
+      if (expectedDayMap[dayName] !== actualDayOfWeek) {
+        console.error(`❌ Day name mismatch: ${dayName} doesn't match ${date.toISOString()} (day ${actualDayOfWeek})`);
+        return null;
+      }
+      return { dayName: dayName, date: date };
+    }
+  }
+  
+  // Format 3: Date ISO (ex: "2025-11-30")
+  const isoRegex = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const isoMatch = trimmed.match(isoRegex);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+    const date = new Date(Date.UTC(year, month, day));
+    const dayOfWeek = date.getUTCDay();
+    
+    // Validate: School days only (Sunday=0 to Thursday=4)
+    if (dayOfWeek === 5 || dayOfWeek === 6) {
+      console.warn(`⚠️ Invalid school day in ISO date: ${trimmed} is ${dayOfWeek === 5 ? 'Friday' : 'Saturday'}`);
+      return null;
+    }
+    
+    const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
+    return { dayName: dayNames[dayOfWeek], date: date };
+  }
+  
+  // Format 4: Date DD/MM/YYYY ou DD-MM-YYYY
+  const dmyRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/;
+  const dmyMatch = trimmed.match(dmyRegex);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10) - 1;
+    const year = parseInt(dmyMatch[3], 10);
+    const date = new Date(Date.UTC(year, month, day));
+    const dayOfWeek = date.getUTCDay();
+    
+    // Validate: School days only (Sunday=0 to Thursday=4)
+    if (dayOfWeek === 5 || dayOfWeek === 6) {
+      console.warn(`⚠️ Invalid school day in DMY date: ${trimmed} is ${dayOfWeek === 5 ? 'Friday' : 'Saturday'}`);
+      return null;
+    }
+    
+    const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
+    return { dayName: dayNames[dayOfWeek], date: date };
+  }
+  
+  return null;
+}
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
+
+// Validate week date ranges on startup
+function validateWeekDateRanges() {
+  console.log('🔍 Validating week date ranges...');
+  let errors = 0;
+  
+  for (const [week, dates] of Object.entries(specificWeekDateRangesNode)) {
+    const startDate = new Date(dates.start + 'T00:00:00Z');
+    const endDate = new Date(dates.end + 'T00:00:00Z');
+    
+    // Check if start is Sunday (0)
+    if (startDate.getUTCDay() !== 0) {
+      console.error(`❌ Week ${week}: Start date ${dates.start} is not Sunday (day ${startDate.getUTCDay()})`);
+      errors++;
+    }
+    
+    // Check if end is Thursday (4)
+    if (endDate.getUTCDay() !== 4) {
+      console.error(`❌ Week ${week}: End date ${dates.end} is not Thursday (day ${endDate.getUTCDay()})`);
+      errors++;
+    }
+    
+    // Check if the range is exactly 4 days (Sunday to Thursday = 4 days difference)
+    const daysDiff = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24));
+    if (daysDiff !== 4) {
+      console.error(`❌ Week ${week}: Date range is ${daysDiff} days instead of 4 days`);
+      errors++;
+    }
+  }
+  
+  if (errors === 0) {
+    console.log('✅ All week date ranges are valid (Sunday to Thursday)');
+  } else {
+    console.error(`❌ Found ${errors} validation error(s) in week date ranges`);
+  }
+  
+  return errors === 0;
+}
+
+// ------------------------- Correction automatique des dates -------------------------
+
+/**
+ * Corrige automatiquement les dates dans les données pour qu'elles correspondent
+ * à la semaine scolaire (Dimanche → Jeudi uniquement)
+ */
+function correctDatesForWeek(data, weekNumber) {
+  if (!Array.isArray(data) || data.length === 0) return data;
+  
+  // Récupérer les dates de la semaine
+  const weekRange = specificWeekDateRangesNode[weekNumber];
+  if (!weekRange) {
+    console.warn(`⚠️ Aucune plage de dates définie pour la semaine ${weekNumber}`);
+    return data;
+  }
+  
+  const startStr = weekRange.start;
+  const endStr = weekRange.end;
+  const weekStart = new Date(startStr + 'T00:00:00.000Z');
+  const weekEnd = new Date(endStr + 'T00:00:00.000Z');
+  
+  // Valider que la semaine commence bien Dimanche et finit Jeudi
+  if (weekStart.getUTCDay() !== 0) {
+    console.error(`❌ ERREUR: La semaine ${weekNumber} ne commence pas un Dimanche!`);
+    return data;
+  }
+  if (weekEnd.getUTCDay() !== 4) {
+    console.error(`❌ ERREUR: La semaine ${weekNumber} ne finit pas un Jeudi!`);
+    return data;
+  }
+  
+  console.log(`🔧 Correction des dates pour semaine ${weekNumber}: ${formatDateFrenchNode(weekStart)} → ${formatDateFrenchNode(weekEnd)}`);
+  
+  // Créer un mapping période → date
+  // 8 périodes par jour, 5 jours (Dimanche → Jeudi)
+  const periodeToDayIndex = (periode) => {
+    const p = parseInt(periode, 10);
+    if (isNaN(p) || p < 1 || p > 40) return null;
+    return Math.floor((p - 1) / 8); // 0=Dimanche, 1=Lundi, ..., 4=Jeudi
+  };
+  
+  // Trouver la clé "Jour" et "Période" (insensible à la casse)
+  const jourKey = Object.keys(data[0] || {}).find(k => k.toLowerCase().trim() === 'jour');
+  const periodeKey = Object.keys(data[0] || {}).find(k => k.toLowerCase().trim() === 'période');
+  
+  if (!jourKey) {
+    console.warn(`⚠️ Colonne "Jour" introuvable, correction impossible`);
+    return data;
+  }
+  
+  let correctionCount = 0;
+  const correctedData = data.map(row => {
+    const periode = row[periodeKey];
+    const dayIndex = periodeToDayIndex(periode);
+    
+    if (dayIndex !== null && dayIndex >= 0 && dayIndex <= 4) {
+      // Calculer la date correcte
+      const correctDate = new Date(weekStart);
+      correctDate.setUTCDate(weekStart.getUTCDate() + dayIndex);
+      
+      // Formater la date correcte
+      const formattedDate = formatDateFrenchNode(correctDate);
+      
+      // Comparer avec la date actuelle
+      const currentJour = row[jourKey];
+      if (currentJour !== formattedDate) {
+        console.log(`  📝 Correction P${periode}: "${currentJour}" → "${formattedDate}"`);
+        correctionCount++;
+      }
+      
+      return {
+        ...row,
+        [jourKey]: formattedDate
+      };
+    }
+    
+    return row;
+  });
+  
+  console.log(`✅ ${correctionCount} dates corrigées sur ${data.length} lignes`);
+  
+  // Vérifier que tous les jours de la semaine sont présents
+  const daysCount = {};
+  correctedData.forEach(row => {
+    const jourValue = row[jourKey];
+    if (jourValue) {
+      if (!daysCount[jourValue]) daysCount[jourValue] = 0;
+      daysCount[jourValue]++;
+    }
+  });
+  
+  console.log('📊 Répartition des jours:');
+  const dayOrder = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
+  dayOrder.forEach((dayName, idx) => {
+    const correctDate = new Date(weekStart);
+    correctDate.setUTCDate(weekStart.getUTCDate() + idx);
+    const formattedDate = formatDateFrenchNode(correctDate);
+    const count = daysCount[formattedDate] || 0;
+    console.log(`  ${dayName} (${formattedDate}): ${count} lignes ${count === 0 ? '⚠️ MANQUANT' : ''}`);
+  });
+  
+  return correctedData;
+}
 
 // ------------------------- Auth & CRUD simples -------------------------
 
@@ -154,13 +422,16 @@ app.post('/api/save-plan', async (req, res) => {
   const data = req.body.data;
   if (isNaN(weekNumber) || !Array.isArray(data)) return res.status(400).json({ message: 'Données invalides.' });
   try {
+    // Corriger les dates avant de sauvegarder
+    const correctedData = correctDatesForWeek(data, weekNumber);
+    
     const db = await connectToDatabase();
     await db.collection('plans').updateOne(
       { week: weekNumber },
-      { $set: { data: data } },
+      { $set: { data: correctedData } },
       { upsert: true }
     );
-    res.status(200).json({ message: `Plan S${weekNumber} enregistré.` });
+    res.status(200).json({ message: `Plan S${weekNumber} enregistré avec ${correctedData.length} lignes.` });
   } catch (error) {
     console.error('Erreur MongoDB /save-plan:', error);
     res.status(500).json({ message: 'Erreur serveur.' });
@@ -244,22 +515,47 @@ app.post('/api/generate-word', async (req, res) => {
       return res.status(400).json({ message: 'Données invalides.' });
     }
 
-    let templateBuffer;
-    try {
-      const response = await fetch(WORD_TEMPLATE_URL);
-      if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
-      templateBuffer = Buffer.from(await response.arrayBuffer());
-    } catch (e) {
-      console.error("Erreur de récupération du modèle Word:", e);
-      return res.status(500).json({ message: `Erreur récup modèle Word.` });
+    console.log(`🔍 Génération Word pour S${weekNumber}, classe ${classe}, ${data.length} lignes de données`);
+    
+    // Debug: Afficher les premières lignes de données
+    if (data.length > 0) {
+      console.log('📋 Exemple de données reçues:');
+      console.log('  Premier élément:', JSON.stringify(data[0], null, 2));
+      console.log('  Clés disponibles:', Object.keys(data[0]));
+    } else {
+      console.log('⚠️ ATTENTION: Aucune donnée reçue !');
+      return res.status(400).json({ message: 'Aucune donnée à générer.' });
     }
 
+    // Charger le template Word local (nettoyé)
+    let templateBuffer;
+    try {
+      const templatePath = path.join(__dirname, '../public/plan_template.docx');
+      templateBuffer = fs.readFileSync(templatePath);
+      console.log('✅ Template Word local chargé:', templatePath);
+    } catch (e) {
+      console.error("❌ Erreur de lecture du template local:", e);
+      // Fallback: essayer de télécharger depuis l'URL
+      try {
+        const response = await fetch(WORD_TEMPLATE_URL);
+        if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
+        templateBuffer = Buffer.from(await response.arrayBuffer());
+        console.log('✅ Template Word téléchargé depuis URL de fallback');
+      } catch (e2) {
+        console.error("❌ Erreur de récupération du modèle Word:", e2);
+        return res.status(500).json({ message: `Erreur récup modèle Word.` });
+      }
+    }
+
+    // Initialiser Docxtemplater
     const zip = new PizZip(templateBuffer);
     const doc = new Docxtemplater(zip, {
       paragraphLoop: true,
+      linebreaks: true,
       nullGetter: () => "",
     });
 
+    // School week: Sunday to Thursday only (5 days)
     const groupedByDay = {};
     const dayOrder = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
     const datesNode = specificWeekDateRangesNode[weekNumber];
@@ -279,22 +575,48 @@ app.post('/api/generate-word', async (req, res) => {
           travauxKey = findKey(sampleRow, 'Travaux de classe'),
           supportKey = findKey(sampleRow, 'Support'),
           devoirsKey = findKey(sampleRow, 'Devoirs');
+    
+    console.log('🔑 Clés identifiées:', { jourKey, periodeKey, matiereKey, leconKey, travauxKey, supportKey, devoirsKey });
 
-    data.forEach(item => {
+    // Grouper les données par jour
+    let itemsProcessed = 0;
+    let itemsSkipped = 0;
+    data.forEach((item, index) => {
       const day = item[jourKey];
-      if (day && dayOrder.includes(day)) {
-        if (!groupedByDay[day]) groupedByDay[day] = [];
-        groupedByDay[day].push(item);
+      if (day) {
+        const parsed = parseDateFromJourValue(day, weekStartDateNode);
+        if (parsed && parsed.dayName) {
+          const dayName = parsed.dayName;
+          if (!groupedByDay[dayName]) groupedByDay[dayName] = [];
+          groupedByDay[dayName].push(item);
+          itemsProcessed++;
+        } else {
+          itemsSkipped++;
+          if (index < 3) {
+            console.log(`⚠️ Ligne ${index}: Jour "${day}" non parsé`);
+          }
+        }
+      } else {
+        itemsSkipped++;
+        if (index < 3) {
+          console.log(`⚠️ Ligne ${index}: Pas de jour (jourKey=${jourKey})`);
+        }
       }
     });
 
+    console.log(`📊 Traitement: ${itemsProcessed} éléments groupés, ${itemsSkipped} ignorés`);
+    console.log('📅 Grouped by day:', Object.keys(groupedByDay).length ? Object.keys(groupedByDay).map(day => `${day}: ${groupedByDay[day].length} items`).join(', ') : 'AUCUN JOUR TROUVÉ!');
+
+    // Créer les données formatées pour chaque jour
     const joursData = dayOrder.map(dayName => {
       if (!groupedByDay[dayName]) return null;
 
-      const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
+      const parsed = parseDateFromJourValue(dayName, weekStartDateNode);
+      const dateOfDay = parsed ? parsed.date : getDateForDayNameNode(weekStartDateNode, dayName);
       const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
       const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
 
+      // Les balises avec @ dans le template utilisent formatTextForWord
       const matieres = sortedEntries.map(item => ({
         matiere: item[matiereKey] ?? "",
         Lecon: formatTextForWord(item[leconKey], { color: 'FF0000' }),
@@ -306,6 +628,18 @@ app.post('/api/generate-word', async (req, res) => {
       return { jourDateComplete: formattedDate, matieres: matieres };
     }).filter(Boolean);
 
+    console.log(`📊 Jours formatés: ${joursData.length} jours avec données`);
+    if (joursData.length === 0) {
+      console.log('❌ ERREUR: Aucun jour formaté ! Les données ne seront pas affichées dans le Word.');
+      console.log('   dayOrder:', dayOrder);
+      console.log('   groupedByDay keys:', Object.keys(groupedByDay));
+    } else {
+      joursData.forEach(j => {
+        console.log(`  - ${j.jourDateComplete}: ${j.matieres.length} matières`);
+      });
+    }
+
+    // Créer la plage de dates
     let plageSemaineText = `Semaine ${weekNumber}`;
     if (datesNode?.start && datesNode?.end) {
       const startD = new Date(datesNode.start + 'T00:00:00Z');
@@ -315,24 +649,42 @@ app.post('/api/generate-word', async (req, res) => {
       }
     }
 
+    // Préparer les données pour le template
     const templateData = {
       semaine: weekNumber,
       classe: classe,
       jours: joursData,
-      notes: formatTextForWord(notes),
+      notes: formatTextForWord(notes || ""),
       plageSemaine: plageSemaineText
     };
 
+    console.log('📝 Template data préparée:', {
+      semaine: templateData.semaine,
+      classe: templateData.classe,
+      plageSemaine: templateData.plageSemaine,
+      joursCount: templateData.jours.length,
+      jours: templateData.jours.map(j => ({
+        jourDateComplete: j.jourDateComplete,
+        matieresCount: j.matieres.length
+      }))
+    });
+
+    // Rendre le template
     doc.render(templateData);
 
+    // Générer le document
     const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+    
     const filename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.send(buf);
 
+    console.log(`✅ Document Word généré avec succès: ${filename}`);
+
   } catch (error) {
     console.error('❌ Erreur serveur /generate-word:', error);
+    console.error('Stack:', error.stack);
     if (!res.headersSent) {
       res.status(500).json({ message: 'Erreur interne /generate-word.' });
     }
@@ -351,21 +703,53 @@ app.post('/api/generate-excel-workbook', async (req, res) => {
     if (!planDocument?.data?.length) return res.status(404).json({ message: `Aucune donnée pour S${weekNumber}.` });
 
     const finalHeaders = [ 'Enseignant', 'Jour', 'Période', 'Classe', 'Matière', 'Leçon', 'Travaux de classe', 'Support', 'Devoirs' ];
+    
+    // Récupérer la date de début de la semaine pour formater les jours
+    const datesNode = specificWeekDateRangesNode[weekNumber];
+    let weekStartDateNode = null;
+    if (datesNode?.start) {
+      weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
+    }
+    
     const formattedData = planDocument.data.map(item => {
       const row = {};
       finalHeaders.forEach(header => {
         const itemKey = findKey(item, header);
-        row[header] = itemKey ? item[itemKey] : '';
+        let value = itemKey ? item[itemKey] : '';
+        
+        // Pour la colonne "Jour", convertir en texte français au lieu d'objet Date
+        if (header === 'Jour' && value && weekStartDateNode && !isNaN(weekStartDateNode.getTime())) {
+          const parsed = parseDateFromJourValue(value, weekStartDateNode);
+          if (parsed && parsed.date) {
+            // Validate: Only school days (Sunday to Thursday)
+            const dayOfWeek = parsed.date.getUTCDay();
+            if (dayOfWeek >= 0 && dayOfWeek <= 4) {
+              // Convertir en texte français au lieu d'objet Date
+              value = formatDateFrenchNode(parsed.date);
+            } else {
+              console.warn(`⚠️ Invalid school day skipped in Excel: ${value} (day ${dayOfWeek})`);
+              value = `[INVALID] ${value}`;
+            }
+          }
+        }
+        
+        row[header] = value;
       });
       return row;
     });
 
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.json_to_sheet(formattedData, { header: finalHeaders });
+    
+    // Définir les largeurs de colonnes
     worksheet['!cols'] = [
-      { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 20 },
+      { wch: 20 }, { wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 20 },
       { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 45 }
     ];
+    
+    // Les dates sont déjà en texte français (formatDateFrenchNode), pas besoin de formater
+    console.log(`✅ Excel généré avec ${formattedData.length} lignes (dates en français)`);
+    
     XLSX.utils.book_append_sheet(workbook, worksheet, `Plan S${weekNumber}`);
 
     const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
@@ -614,8 +998,223 @@ Génère une réponse au format JSON valide uniquement selon la structure suivan
   }
 });
 
+// --------------------- Génération IA Hebdomadaire (plans multiples) --------------------
+
+app.post('/api/generate-weekly-lesson-plans', async (req, res) => {
+  try {
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) {
+      return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });
+    }
+
+    const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL;
+    if (!lessonTemplateUrl) {
+      return res.status(503).json({ message: "L'URL du modèle de leçon Word n'est pas configurée." });
+    }
+
+    const { week, data } = req.body;
+    if (!data || !Array.isArray(data) || data.length === 0 || !week) {
+      return res.status(400).json({ message: "Les données ou la semaine sont manquantes." });
+    }
+
+    console.log(`🚀 Génération de ${data.length} plans de leçons IA pour la semaine ${week}`);
+
+    // Charger le modèle Word une seule fois
+    let templateBuffer;
+    try {
+      const response = await fetch(lessonTemplateUrl);
+      if (!response.ok) throw new Error(`Échec du téléchargement du modèle Word (${response.status})`);
+      templateBuffer = Buffer.from(await response.arrayBuffer());
+    } catch (e) {
+      console.error("Erreur de récupération du modèle Word:", e);
+      return res.status(500).json({ message: "Impossible de récupérer le modèle de leçon depuis l'URL fournie." });
+    }
+
+    const archiver = require('archiver');
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="Plans_Lecons_Semaine_${week}.zip"`);
+
+    archive.pipe(res);
+
+    // Créer un fichier info
+    const infoContent = `Plans de leçons générés pour la semaine ${week}\nNombre total: ${data.length}\nGénéré le: ${new Date().toLocaleString('fr-FR')}\n`;
+    archive.append(infoContent, { name: 'INFO.txt' });
+
+    // Générer chaque plan de leçon individuellement
+    const MODEL_NAME = "gemini-2.5-flash";
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+    
+    const weekNumber = Number(week);
+    const datesNode = specificWeekDateRangesNode[weekNumber];
+    
+    const jsonStructure = `{"TitreUnite":"un titre d'unité pertinent pour la leçon","Methodes":"liste des méthodes d'enseignement","Outils":"liste des outils de travail","Objectifs":"une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\\\n). Commence chaque objectif par un tiret (-).","etapes":[{"phase":"Introduction","duree":"5 min","activite":"Description de l'activité d'introduction pour l'enseignant et les élèves."},{"phase":"Activité Principale","duree":"25 min","activite":"Description de l'activité principale, en intégrant les 'travaux de classe' et le 'support' si possible."},{"phase":"Synthèse","duree":"10 min","activite":"Description de l'activité de conclusion et de vérification des acquis."},{"phase":"Clôture","duree":"5 min","activite":"Résumé rapide et annonce des devoirs."}],"Ressources":"les ressources spécifiques à utiliser.","Devoirs":"une suggestion de devoirs.","DiffLents":"une suggestion pour aider les apprenants en difficulté.","DiffTresPerf":"une suggestion pour stimuler les apprenants très performants.","DiffTous":"une suggestion de différenciation pour toute la classe."}`;
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < data.length; i++) {
+      try {
+        const rowData = data[i];
+        console.log(`📝 Génération du plan ${i + 1}/${data.length}...`);
+
+        // Extraire les données
+        const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
+        const classe = rowData[findKey(rowData, 'Classe')] || '';
+        const matiere = rowData[findKey(rowData, 'Matière')] || '';
+        const lecon = rowData[findKey(rowData, 'Leçon')] || '';
+        const jour = rowData[findKey(rowData, 'Jour')] || '';
+        const seance = rowData[findKey(rowData, 'Période')] || '';
+        const support = rowData[findKey(rowData, 'Support')] || 'Non spécifié';
+        const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
+        const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
+
+        // Date formatée
+        let formattedDate = "";
+        if (jour && datesNode?.start) {
+          const weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
+          if (!isNaN(weekStartDateNode.getTime())) {
+            const dateOfDay = getDateForDayNameNode(weekStartDateNode, jour);
+            if (dateOfDay) formattedDate = formatDateFrenchNode(dateOfDay);
+          }
+        }
+
+        // Créer le prompt selon la langue de l'enseignant
+        let prompt;
+        if (englishTeachers.includes(enseignant)) {
+          prompt = `As an expert pedagogical assistant, create a detailed 45-minute lesson plan in English. Structure the lesson into timed phases. Intelligently integrate the teacher's existing notes:
+- Subject: ${matiere}, Class: ${classe}, Lesson Topic: ${lecon}
+- Planned Classwork: ${travaux}
+- Mentioned Support/Materials: ${support}
+- Planned Homework: ${devoirsPrevus}
+Generate a response in valid JSON format only. Use the following JSON structure with professional and concrete values in English: ${jsonStructure}`;
+        } else if (arabicTeachers.includes(enseignant)) {
+          prompt = `بصفتك مساعدًا تربويًا خبيرًا، قم بإنشاء خطة درس مفصلة باللغة العربية مدتها 45 دقيقة. قم ببناء الدرس في مراحل محددة بوقت. ادمج بذكاء ملاحظات المعلم الحالية:
+- المادة: ${matiere}, الفصل: ${classe}, موضوع الدرس: ${lecon}
+- عمل الفصل المخطط له: ${travaux}
+- الدعم / المواد المذكورة: ${support}
+- الواجبات المخطط لها: ${devoirsPrevus}
+قم بإنشاء استجابة بتنسيق JSON صالح فقط. يجب استعمال البنية التالية بقيم مهنية وملموسة (المفاتيح بالإنجليزية): ${jsonStructure}`;
+        } else {
+          prompt = `En tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure la leçon en phases chronométrées. Intègre intelligemment les notes existantes de l'enseignant :
+- Matière: ${matiere}, Classe: ${classe}, Thème de la leçon: ${lecon}
+- Travaux de classe prévus : ${travaux}
+- Support/Matériel mentionné : ${support}
+- Devoirs prévus : ${devoirsPrevus}
+Génère une réponse au format JSON valide uniquement selon la structure suivante (valeurs concrètes et professionnelles en français) : ${jsonStructure}`;
+        }
+
+        // Appeler l'API Gemini
+        const requestBody = {
+          contents: [{ role: "user", parts: [{ text: prompt }]}],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
+        };
+
+        const aiResponse = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!aiResponse.ok) {
+          const errorBody = await aiResponse.json().catch(() => ({}));
+          console.error(`❌ Erreur API Gemini pour plan ${i + 1}:`, errorBody);
+          errorCount++;
+          continue; // Passer au suivant
+        }
+
+        const aiResult = await aiResponse.json();
+        const text = aiResult?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+        let aiData;
+        try {
+          aiData = JSON.parse(text);
+        } catch (e) {
+          console.error(`❌ Erreur parsing JSON pour plan ${i + 1}:`, text);
+          errorCount++;
+          continue;
+        }
+
+        // Générer le document Word
+        const zip = new PizZip(templateBuffer);
+        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
+
+        let minutageString = "";
+        let contenuString = "";
+        if (aiData.etapes && Array.isArray(aiData.etapes)) {
+          minutageString = aiData.etapes.map(e => e.duree || "").join('\n');
+          contenuString = aiData.etapes.map(e => `▶ ${e.phase || ""}:\n${e.activite || ""}`).join('\n\n');
+        }
+
+        const templateData = {
+          ...aiData,
+          Semaine: week,
+          Lecon: lecon,
+          Matiere: matiere,
+          Classe: classe,
+          Jour: jour,
+          Seance: seance,
+          NomEnseignant: enseignant,
+          Date: formattedDate,
+          Deroulement: minutageString,
+          Contenu: contenuString,
+        };
+
+        doc.render(templateData);
+        const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+
+        // Créer un nom de fichier sécurisé
+        const sanitizeForFilename = (str) => {
+          if (typeof str !== 'string') str = String(str);
+          const normalized = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          return normalized
+            .replace(/\s+/g, '-')
+            .replace(/[^a-zA-Z0-9-]/g, '_')
+            .replace(/__+/g, '_');
+        };
+
+        const filename = `Plan_${i + 1}_${sanitizeForFilename(classe)}_${sanitizeForFilename(matiere)}_${sanitizeForFilename(seance)}.docx`;
+        
+        // Ajouter au ZIP
+        archive.append(buf, { name: filename });
+        successCount++;
+        console.log(`✅ Plan ${i + 1}/${data.length} généré: ${filename}`);
+
+      } catch (error) {
+        console.error(`❌ Erreur génération plan ${i + 1}:`, error);
+        errorCount++;
+      }
+    }
+
+    // Ajouter un résumé
+    const summaryContent = `Résumé de génération
+======================
+Total demandés: ${data.length}
+Succès: ${successCount}
+Erreurs: ${errorCount}
+Génération terminée le: ${new Date().toLocaleString('fr-FR')}
+`;
+    archive.append(summaryContent, { name: 'RESUME.txt' });
+
+    await archive.finalize();
+    console.log(`✅ Archive ZIP finalisée: ${successCount} plans générés, ${errorCount} erreurs`);
+    
+  } catch (error) {
+    console.error('❌ Erreur serveur /generate-weekly-lesson-plans:', error);
+    if (!res.headersSent) {
+      const errorMessage = error.message || "Erreur interne.";
+      res.status(500).json({ message: `Erreur interne lors de la génération hebdomadaire: ${errorMessage}` });
+    }
+  }
+});
+
 // Démarrer le serveur seulement si ce fichier est exécuté directement
 if (require.main === module) {
+  // Validate week date ranges on startup
+  validateWeekDateRanges();
+  
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Serveur Plans Hebdomadaires démarré sur le port ${PORT}`);
@@ -623,6 +1222,4 @@ if (require.main === module) {
   });
 }
 
-
-// --------------------- Génération IA Hebdomadaire (plans multiples) --------------------\n\napp.post("/api/generate-weekly-lesson-plans", async (req, res) => {\n  try {\n    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;\n    if (!GEMINI_API_KEY) {\n      return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });\n    }\n\n    const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL;\n    if (!lessonTemplateUrl) {\n      return res.status(503).json({ message: "L'URL du modèle de leçon Word n'est pas configurée." });\n    }\n\n    const { week, data } = req.body;\n    if (!data || !Array.isArray(data) || data.length === 0 || !week) {\n      return res.status(400).json({ message: "Les données ou la semaine sont manquantes." });\n    }\n\n    console.log(`Génération de ${data.length} plans de leçons pour la semaine ${week}`);\n\n    // Charger le modèle Word\n    let templateBuffer;\n    try {\n      const response = await fetch(lessonTemplateUrl);\n      if (!response.ok) throw new Error(`Échec du téléchargement du modèle Word (${response.status})`);\n      templateBuffer = Buffer.from(await response.arrayBuffer());\n    } catch (e) {\n      console.error("Erreur de récupération du modèle Word:", e);\n      return res.status(500).json({ message: "Impossible de récupérer le modèle de leçon depuis l'URL fournie." });\n    }\n\n    const archiver = require("archiver");\n    const archive = archiver("zip", { zlib: { level: 9 } });\n\n    res.setHeader("Content-Type", "application/zip");\n    res.setHeader("Content-Disposition", `attachment; filename="Plans_Lecons_Semaine_${week}.zip"`);\n\n    archive.pipe(res);\n\n    // Ajouter un fichier de test pour vérifier que le ZIP fonctionne\n    archive.append("Plans de leçons générés pour la semaine " + week, { name: "info.txt" });\n\n    await archive.finalize();\n    \n  } catch (error) {\n    console.error("❌ Erreur serveur /generate-weekly-lesson-plans:", error);\n    if (!res.headersSent) {\n      const errorMessage = error.message || "Erreur interne.";\n      res.status(500).json({ message: `Erreur interne lors de la génération hebdomadaire: ${errorMessage}` });\n    }\n  }\n});
 module.exports = app;
