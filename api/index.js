@@ -1,8 +1,6 @@
-// api/index.js — Version REST (fetch) corrigée avec résolution dynamique modèle Gemini
+// api/index.js — v1, sélection dynamique du modèle, sortie JSON via prompt (sans generationConfig)
 
 const express = require('express');
-const path = require('path');
-const fs = require('fs');
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
 const XLSX = require('xlsx');
@@ -12,7 +10,7 @@ const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
 
 // ========================================================================
-// ========= FONCTION D'AIDE POUR LA GÉNÉRATION WORD (VERSION FINALE) =====
+// ====================== AIDES POUR GÉNÉRATION WORD ======================
 // ========================================================================
 
 const xmlEscape = (str) => {
@@ -58,18 +56,13 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(fileUpload());
 
-// Servir les fichiers statiques depuis le dossier public
-app.use(express.static(path.join(__dirname, '../public')));
-
 const MONGO_URL = process.env.MONGO_URL;
-const WORD_TEMPLATE_URL = process.env.WORD_TEMPLATE_URL || 'https://docs.google.com/document/d/1E4JZY34Mbk7cE4E8Yu3dzG8zJIiraGDJ/export?format=docx';
+const WORD_TEMPLATE_URL = process.env.WORD_TEMPLATE_URL;
 const LESSON_TEMPLATE_URL = process.env.LESSON_TEMPLATE_URL;
 
-// GARDER LES ENSEIGNANTS ACTUELS (GARÇONS)
-const arabicTeachers = ['Majed', 'Jaber', 'Imad', 'Saeed'];
-const englishTeachers = ['Kamel'];
+const arabicTeachers = ['Sara', 'Amal Najar', 'Emen', 'Fatima', 'Ghadah', 'Hana'];
+const englishTeachers = ['Jana','Amal','Farah','Tayba','Shanoja'];
 
-// School week date ranges: Sunday (Dimanche) to Thursday (Jeudi) - 5 days per week
 const specificWeekDateRangesNode = {
   1:{start:'2025-08-31',end:'2025-09-04'}, 2:{start:'2025-09-07',end:'2025-09-11'}, 3:{start:'2025-09-14',end:'2025-09-18'}, 4:{start:'2025-09-21',end:'2025-09-25'}, 5:{start:'2025-09-28',end:'2025-10-02'}, 6:{start:'2025-10-05',end:'2025-10-09'}, 7:{start:'2025-10-12',end:'2025-10-16'}, 8:{start:'2025-10-19',end:'2025-10-23'}, 9:{start:'2025-10-26',end:'2025-10-30'},10:{start:'2025-11-02',end:'2025-11-06'},
   11:{start:'2025-11-09',end:'2025-11-13'},12:{start:'2025-11-16',end:'2025-11-20'}, 13:{start:'2025-11-23',end:'2025-11-27'},14:{start:'2025-11-30',end:'2025-12-04'}, 15:{start:'2025-12-07',end:'2025-12-11'},16:{start:'2025-12-14',end:'2025-12-18'}, 17:{start:'2025-12-21',end:'2025-12-25'},18:{start:'2025-12-28',end:'2026-01-01'}, 19:{start:'2026-01-04',end:'2026-01-08'},20:{start:'2026-01-11',end:'2026-01-15'},
@@ -78,11 +71,12 @@ const specificWeekDateRangesNode = {
   41:{start:'2026-06-07',end:'2026-06-11'},42:{start:'2026-06-14',end:'2026-06-18'}, 43:{start:'2026-06-21',end:'2026-06-25'},44:{start:'2026-06-28',end:'2026-07-02'}, 45:{start:'2026-07-05',end:'2026-07-09'},46:{start:'2026-07-12',end:'2026-07-16'}, 47:{start:'2026-07-19',end:'2026-07-23'},48:{start:'2026-07-26',end:'2026-07-30'}
 };
 
-// GARDER LES UTILISATEURS ACTUELS (GARÇONS)
 const validUsers = {
-  "Mohamed": "Mohamed", "Abas": "Abas", "Jaber": "Jaber", "Imad": "Imad", "Kamel": "Kamel",
-  "Majed": "Majed", "Mohamed Ali": "Mohamed Ali", "Morched": "Morched",
-  "Saeed": "Saeed", "Sami": "Sami", "Sylvano": "Sylvano", "Tonga": "Tonga", "Oumarou": "Oumarou", "Zine": "Zine", "Youssouf": "Youssouf"
+ "Mohamed": "Mohamed", "Zohra": "Zohra", "Jana": "Jana", "Aichetou": "Aichetou",
+  "Amal": "Amal", "Amal Najar": "Amal Najar", "Ange": "Ange", "Anouar": "Anouar",
+  "Emen": "Emen", "Farah": "Farah", "Fatima": "Fatima", "Ghadah": "Ghadah",
+  "Hana": "Hana", "Samira": "Samira", "Tayba": "Tayba", "Shanoja": "Shanoja",
+  "Sara": "Sara", "Souha": "Souha", "Inas": "Inas"
 };
 
 let cachedDb = null;
@@ -105,7 +99,6 @@ function formatDateFrenchNode(date) {
   const yearNum = date.getUTCFullYear();
   return `${dayName} ${dayNum} ${monthName} ${yearNum}`;
 }
-
 function getDateForDayNameNode(weekStartDate, dayName) {
   if (!weekStartDate || isNaN(weekStartDate.getTime())) return null;
   const dayOrder = { "Dimanche": 0, "Lundi": 1, "Mardi": 2, "Mercredi": 3, "Jeudi": 4 };
@@ -119,11 +112,16 @@ function getDateForDayNameNode(weekStartDate, dayName) {
   specificDate.setUTCDate(specificDate.getUTCDate() + offset);
   return specificDate;
 }
-
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
 
-// ======================= Sélection dynamique du modèle Gemini ==================
+// ======================= Sélection dynamique du modèle ==================
 
+/**
+ * Liste les modèles disponibles via l'API v1 et retourne le premier modèle
+ * correspondant à la liste de préférence ET supportant generateContent.
+ *
+ * On gère les changements de noms (EoL des 1.5, arrivée des 2.5, etc.).
+ */
 async function resolveGeminiModel(apiKey) {
   const url = `https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`;
   const resp = await fetch(url);
@@ -134,16 +132,20 @@ async function resolveGeminiModel(apiKey) {
   const json = await resp.json();
   const models = Array.isArray(json.models) ? json.models : [];
 
+  // Préférence (ordre décroissant) – ajuste si besoin selon tes coûts/perf
   const preferredNames = [
+    // Généraux actuels
     "gemini-2.5-flash",
     "gemini-2.5-pro",
     "gemini-2.5-flash-lite",
+    // Anciennes séries (si encore exposées pour ta clé)
     "gemini-1.5-flash-001",
     "gemini-1.5-pro-002",
     "gemini-1.5-flash"
   ];
 
   const nameSet = new Map(models.map(m => [m.name, m]));
+  // Cherche d'abord dans les préférés
   for (const short of preferredNames) {
     const full = `models/${short}`;
     const m = nameSet.get(full);
@@ -151,11 +153,11 @@ async function resolveGeminiModel(apiKey) {
       return short;
     }
   }
-  
+  // Sinon, prends le premier qui supporte generateContent
   const any = models.find(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes("generateContent"));
   if (any) return any.name.replace(/^models\//, "");
 
-  throw new Error("Aucun modèle compatible v1 trouvé pour votre clé.");
+  throw new Error("Aucun modèle compatible v1 trouvé pour votre clé (generateContent). Vérifiez l'accès de la clé et l'API activée.");
 }
 
 // ------------------------- Auth & CRUD simples -------------------------
@@ -265,6 +267,7 @@ app.post('/api/save-row', async (req, res) => {
   }
 });
 
+// Correction MongoDB ($ne dupliqué → $nin)
 app.get('/api/all-classes', async (req, res) => {
   try {
     const db = await connectToDatabase();
@@ -342,7 +345,7 @@ app.post('/api/generate-word', async (req, res) => {
         Lecon: formatTextForWord(item[leconKey], { color: 'FF0000' }),
         travailDeClasse: formatTextForWord(item[travauxKey]),
         Support: formatTextForWord(item[supportKey], { color: 'FF0000', italic: true }),
-        devoirs: formatTextForWord(item[devoirsKey], { color: '0000FF' })
+        devoirs: formatTextForWord(item[devoirsKey], { color: '0000FF', italic: true })
       }));
 
       return { jourDateComplete: formattedDate, matieres: matieres };
@@ -361,7 +364,7 @@ app.post('/api/generate-word', async (req, res) => {
       semaine: weekNumber,
       classe: classe,
       jours: joursData,
-      notes: formatTextForWord(notes || ""),
+      notes: formatTextForWord(notes),
       plageSemaine: plageSemaineText
     };
 
@@ -511,6 +514,7 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
       return res.status(400).json({ message: "Les données de la ligne ou de la semaine sont manquantes." });
     }
 
+    // Charger le modèle Word
     let templateBuffer;
     try {
       const response = await fetch(lessonTemplateUrl);
@@ -521,6 +525,7 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
       return res.status(500).json({ message: "Impossible de récupérer le modèle de leçon depuis l'URL fournie." });
     }
 
+    // Extraire données
     const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
     const classe = rowData[findKey(rowData, 'Classe')] || '';
     const matiere = rowData[findKey(rowData, 'Matière')] || '';
@@ -531,6 +536,7 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
     const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
     const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
 
+    // Date formatée
     let formattedDate = "";
     const weekNumber = Number(week);
     const datesNode = specificWeekDateRangesNode[weekNumber];
@@ -542,6 +548,7 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
       }
     }
 
+    // Prompt + structure JSON
     const jsonStructure = `{"TitreUnite":"un titre d'unité pertinent pour la leçon","Methodes":"liste des méthodes d'enseignement","Outils":"liste des outils de travail","Objectifs":"une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\\\n). Commence chaque objectif par un tiret (-).","etapes":[{"phase":"Introduction","duree":"5 min","activite":"Description de l'activité d'introduction pour l'enseignant et les élèves."},{"phase":"Activité Principale","duree":"25 min","activite":"Description de l'activité principale, en intégrant les 'travaux de classe' et le 'support' si possible."},{"phase":"Synthèse","duree":"10 min","activite":"Description de l'activité de conclusion et de vérification des acquis."},{"phase":"Clôture","duree":"5 min","activite":"Résumé rapide et annonce des devoirs."}],"Ressources":"les ressources spécifiques à utiliser.","Devoirs":"une suggestion de devoirs.","DiffLents":"une suggestion pour aider les apprenants en difficulté.","DiffTresPerf":"une suggestion pour stimuler les apprenants très performants.","DiffTous":"une suggestion de différenciation pour toute la classe."}`;
 
     let prompt;
@@ -580,6 +587,7 @@ Utilise la structure JSON suivante (valeurs concrètes et professionnelles ; cl�
 ${jsonStructure}`;
     }
 
+    // === Résolution dynamique du modèle compatible v1 ===
     const MODEL_NAME = await resolveGeminiModel(GEMINI_API_KEY);
     const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
 
@@ -587,6 +595,7 @@ ${jsonStructure}`;
       contents: [
         { role: "user", parts: [{ text: prompt }] }
       ]
+      // Pas de generationConfig pour éviter les 400 sur certains déploiements
     };
 
     const aiResponse = await fetch(API_URL, {
@@ -603,6 +612,7 @@ ${jsonStructure}`;
 
     const aiResult = await aiResponse.json();
 
+    // Extraction robuste du texte JSON renvoyé
     let text = "";
     try {
       text = aiResult?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
@@ -619,6 +629,7 @@ ${jsonStructure}`;
       return res.status(500).json({ message: "Réponse IA vide ou non reconnue." });
     }
 
+    // Parse JSON avec petit nettoyage si Markdown accidentel
     let aiData;
     try {
       aiData = JSON.parse(text);
@@ -627,6 +638,7 @@ ${jsonStructure}`;
       aiData = JSON.parse(cleaned);
     }
 
+    // Préparer le DOCX
     const zip = new PizZip(templateBuffer);
     const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
 
@@ -663,7 +675,7 @@ ${jsonStructure}`;
         .replace(/__+/g, '_');
     };
 
-    const filename = `Plan_de_lecon-${sanitizeForFilename(matiere)}-${sanitizeForFilename(seance)}-${sanitizeForFilename(classe)}-Semaine${weekNumber}.docx`;
+    const filename = `Plan de lecon-${sanitizeForFilename(matiere)}-${sanitizeForFilename(seance)}-${sanitizeForFilename(classe)}-Semaine${weekNumber}.docx`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.send(buf);
@@ -676,14 +688,5 @@ ${jsonStructure}`;
     }
   }
 });
-
-// Démarrer le serveur seulement si ce fichier est exécuté directement
-if (require.main === module) {
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Serveur Plans Hebdomadaires démarré sur le port ${PORT}`);
-    console.log(`📝 Application accessible à l'adresse : http://localhost:${PORT}`);
-  });
-}
 
 module.exports = app;
