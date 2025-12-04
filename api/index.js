@@ -296,7 +296,8 @@ function correctDatesForWeek(data, weekNumber) {
     return data;
   }
   
-  const [startStr, endStr] = weekRange;
+  const startStr = weekRange.start;
+  const endStr = weekRange.end;
   const weekStart = new Date(startStr + 'T00:00:00.000Z');
   const weekEnd = new Date(endStr + 'T00:00:00.000Z');
   
