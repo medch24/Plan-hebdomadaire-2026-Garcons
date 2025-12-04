@@ -72,6 +72,9 @@ const LESSON_TEMPLATE_URL = process.env.LESSON_TEMPLATE_URL;
 const arabicTeachers = ['Majed', 'Jaber', 'Imad', 'Saeed'];
 const englishTeachers = ['Kamel'];
 
+// School week date ranges: Sunday (Dimanche) to Thursday (Jeudi) - 5 days per week
+// Start date MUST be Sunday, End date MUST be Thursday
+// Format: YYYY-MM-DD (ISO 8601)
 const specificWeekDateRangesNode = {
   1:{start:'2025-08-31',end:'2025-09-04'}, 2:{start:'2025-09-07',end:'2025-09-11'}, 3:{start:'2025-09-14',end:'2025-09-18'}, 4:{start:'2025-09-21',end:'2025-09-25'}, 5:{start:'2025-09-28',end:'2025-10-02'}, 6:{start:'2025-10-05',end:'2025-10-09'}, 7:{start:'2025-10-12',end:'2025-10-16'}, 8:{start:'2025-10-19',end:'2025-10-23'}, 9:{start:'2025-10-26',end:'2025-10-30'},10:{start:'2025-11-02',end:'2025-11-06'},
   11:{start:'2025-11-09',end:'2025-11-13'},12:{start:'2025-11-16',end:'2025-11-20'}, 13:{start:'2025-11-23',end:'2025-11-27'},14:{start:'2025-11-30',end:'2025-12-04'}, 15:{start:'2025-12-07',end:'2025-12-11'},16:{start:'2025-12-14',end:'2025-12-18'}, 17:{start:'2025-12-21',end:'2025-12-25'},18:{start:'2025-12-28',end:'2026-01-01'}, 19:{start:'2026-01-04',end:'2026-01-08'},20:{start:'2026-01-11',end:'2026-01-15'},
@@ -101,6 +104,13 @@ function formatDateFrenchNode(date) {
   const days = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
   const months = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
   const dayName = days[date.getUTCDay()];
+  
+  // Validate: School week is Sunday to Thursday only (no Friday/Saturday)
+  if (date.getUTCDay() === 5 || date.getUTCDay() === 6) {
+    console.warn(`⚠️ Invalid school day detected: ${dayName}`);
+    return "Date invalide (jour non scolaire)";
+  }
+  
   const dayNum = String(date.getUTCDate()).padStart(2, '0');
   const monthName = months[date.getUTCMonth()];
   const yearNum = date.getUTCFullYear();
@@ -108,15 +118,29 @@ function formatDateFrenchNode(date) {
 }
 function getDateForDayNameNode(weekStartDate, dayName) {
   if (!weekStartDate || isNaN(weekStartDate.getTime())) return null;
+  
+  // School week: Sunday (Dimanche) to Thursday (Jeudi) only - 5 days
   const dayOrder = { "Dimanche": 0, "Lundi": 1, "Mardi": 2, "Mercredi": 3, "Jeudi": 4 };
   const offset = dayOrder[dayName];
-  if (offset === undefined) return null;
+  
+  if (offset === undefined) {
+    console.warn(`⚠️ Invalid day name: ${dayName}. Only Dimanche-Jeudi are valid.`);
+    return null;
+  }
+  
   const specificDate = new Date(Date.UTC(
     weekStartDate.getUTCFullYear(),
     weekStartDate.getUTCMonth(),
     weekStartDate.getUTCDate()
   ));
   specificDate.setUTCDate(specificDate.getUTCDate() + offset);
+  
+  // Double-check: ensure we don't accidentally generate Friday or Saturday
+  if (specificDate.getUTCDay() === 5 || specificDate.getUTCDay() === 6) {
+    console.error(`❌ ERROR: Generated invalid school day (${specificDate.getUTCDay()})`);
+    return null;
+  }
+  
   return specificDate;
 }
 
@@ -127,22 +151,50 @@ function parseDateFromJourValue(jourValue, weekStartDate) {
   const trimmed = String(jourValue).trim();
   
   // Format 1: Juste le nom du jour (ex: "Dimanche", "Lundi")
-  const dayMapFr = {"Dimanche":0, "Lundi":1, "Mardi":2, "Mercredi":3, "Jeudi":4, "Vendredi":5, "Samedi":6};
+  // School week: Sunday to Thursday only (5 days)
+  const dayMapFr = {"Dimanche":0, "Lundi":1, "Mardi":2, "Mercredi":3, "Jeudi":4};
   if (dayMapFr.hasOwnProperty(trimmed)) {
-    return { dayName: trimmed, date: getDateForDayNameNode(weekStartDate, trimmed) };
+    const date = getDateForDayNameNode(weekStartDate, trimmed);
+    if (!date) {
+      console.warn(`⚠️ Failed to generate date for day: ${trimmed}`);
+      return null;
+    }
+    return { dayName: trimmed, date: date };
+  }
+  
+  // Reject Friday and Saturday explicitly
+  if (trimmed === "Vendredi" || trimmed === "Samedi") {
+    console.warn(`⚠️ Invalid school day rejected: ${trimmed}`);
+    return null;
   }
   
   // Format 2: Date complète française (ex: "Dimanche 30 Novembre 2025")
+  // School week: Only Dimanche (Sunday) to Jeudi (Thursday)
   const frenchDateRegex = /^(Dimanche|Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi)\s+(\d{1,2})\s+(Janvier|Février|Mars|Avril|Mai|Juin|Juillet|Août|Septembre|Octobre|Novembre|Décembre)\s+(\d{4})$/i;
   const frenchMatch = trimmed.match(frenchDateRegex);
   if (frenchMatch) {
     const dayName = frenchMatch[1];
+    
+    // Reject non-school days
+    if (dayName === "Vendredi" || dayName === "Samedi") {
+      console.warn(`⚠️ Invalid school day in date string: ${dayName}`);
+      return null;
+    }
+    
     const day = parseInt(frenchMatch[2], 10);
     const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
     const month = monthNames.findIndex(m => m.toLowerCase() === frenchMatch[3].toLowerCase());
     const year = parseInt(frenchMatch[4], 10);
     if (month !== -1) {
-      return { dayName: dayName, date: new Date(Date.UTC(year, month, day)) };
+      const date = new Date(Date.UTC(year, month, day));
+      // Verify the day of week matches
+      const actualDayOfWeek = date.getUTCDay();
+      const expectedDayMap = {"Dimanche":0, "Lundi":1, "Mardi":2, "Mercredi":3, "Jeudi":4};
+      if (expectedDayMap[dayName] !== actualDayOfWeek) {
+        console.error(`❌ Day name mismatch: ${dayName} doesn't match ${date.toISOString()} (day ${actualDayOfWeek})`);
+        return null;
+      }
+      return { dayName: dayName, date: date };
     }
   }
   
@@ -154,8 +206,16 @@ function parseDateFromJourValue(jourValue, weekStartDate) {
     const month = parseInt(isoMatch[2], 10) - 1;
     const day = parseInt(isoMatch[3], 10);
     const date = new Date(Date.UTC(year, month, day));
-    const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
-    return { dayName: dayNames[date.getUTCDay()], date: date };
+    const dayOfWeek = date.getUTCDay();
+    
+    // Validate: School days only (Sunday=0 to Thursday=4)
+    if (dayOfWeek === 5 || dayOfWeek === 6) {
+      console.warn(`⚠️ Invalid school day in ISO date: ${trimmed} is ${dayOfWeek === 5 ? 'Friday' : 'Saturday'}`);
+      return null;
+    }
+    
+    const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
+    return { dayName: dayNames[dayOfWeek], date: date };
   }
   
   // Format 4: Date DD/MM/YYYY ou DD-MM-YYYY
@@ -166,13 +226,59 @@ function parseDateFromJourValue(jourValue, weekStartDate) {
     const month = parseInt(dmyMatch[2], 10) - 1;
     const year = parseInt(dmyMatch[3], 10);
     const date = new Date(Date.UTC(year, month, day));
-    const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
-    return { dayName: dayNames[date.getUTCDay()], date: date };
+    const dayOfWeek = date.getUTCDay();
+    
+    // Validate: School days only (Sunday=0 to Thursday=4)
+    if (dayOfWeek === 5 || dayOfWeek === 6) {
+      console.warn(`⚠️ Invalid school day in DMY date: ${trimmed} is ${dayOfWeek === 5 ? 'Friday' : 'Saturday'}`);
+      return null;
+    }
+    
+    const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
+    return { dayName: dayNames[dayOfWeek], date: date };
   }
   
   return null;
 }
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
+
+// Validate week date ranges on startup
+function validateWeekDateRanges() {
+  console.log('🔍 Validating week date ranges...');
+  let errors = 0;
+  
+  for (const [week, dates] of Object.entries(specificWeekDateRangesNode)) {
+    const startDate = new Date(dates.start + 'T00:00:00Z');
+    const endDate = new Date(dates.end + 'T00:00:00Z');
+    
+    // Check if start is Sunday (0)
+    if (startDate.getUTCDay() !== 0) {
+      console.error(`❌ Week ${week}: Start date ${dates.start} is not Sunday (day ${startDate.getUTCDay()})`);
+      errors++;
+    }
+    
+    // Check if end is Thursday (4)
+    if (endDate.getUTCDay() !== 4) {
+      console.error(`❌ Week ${week}: End date ${dates.end} is not Thursday (day ${endDate.getUTCDay()})`);
+      errors++;
+    }
+    
+    // Check if the range is exactly 4 days (Sunday to Thursday = 4 days difference)
+    const daysDiff = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24));
+    if (daysDiff !== 4) {
+      console.error(`❌ Week ${week}: Date range is ${daysDiff} days instead of 4 days`);
+      errors++;
+    }
+  }
+  
+  if (errors === 0) {
+    console.log('✅ All week date ranges are valid (Sunday to Thursday)');
+  } else {
+    console.error(`❌ Found ${errors} validation error(s) in week date ranges`);
+  }
+  
+  return errors === 0;
+}
 
 // ------------------------- Auth & CRUD simples -------------------------
 
@@ -342,6 +448,7 @@ app.post('/api/generate-word', async (req, res) => {
       nullGetter: () => "",
     });
 
+    // School week: Sunday to Thursday only (5 days)
     const groupedByDay = {};
     const dayOrder = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
     const datesNode = specificWeekDateRangesNode[weekNumber];
@@ -507,8 +614,15 @@ app.post('/api/generate-excel-workbook', async (req, res) => {
         if (header === 'Jour' && value && weekStartDateNode && !isNaN(weekStartDateNode.getTime())) {
           const dateOfDay = getDateForDayNameNode(weekStartDateNode, value);
           if (dateOfDay) {
-            // Stocker l'objet Date JavaScript pour Excel
-            value = dateOfDay;
+            // Validate: Only school days (Sunday to Thursday)
+            const dayOfWeek = dateOfDay.getUTCDay();
+            if (dayOfWeek >= 0 && dayOfWeek <= 4) {
+              // Stocker l'objet Date JavaScript pour Excel
+              value = dateOfDay;
+            } else {
+              console.warn(`⚠️ Invalid school day skipped in Excel: ${value} (day ${dayOfWeek})`);
+              value = `[INVALID] ${value}`;
+            }
           }
         }
         
@@ -1002,6 +1116,9 @@ Génération terminée le: ${new Date().toLocaleString('fr-FR')}
 
 // Démarrer le serveur seulement si ce fichier est exécuté directement
 if (require.main === module) {
+  // Validate week date ranges on startup
+  validateWeekDateRanges();
+  
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Serveur Plans Hebdomadaires démarré sur le port ${PORT}`);

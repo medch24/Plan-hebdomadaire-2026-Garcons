@@ -1,5 +1,10 @@
 # Structure du Template Word
 
+## ⚠️ IMPORTANT: School Week Definition
+- **School week is 5 days: Sunday (Dimanche) to Thursday (Jeudi) ONLY**
+- **NO Friday (Vendredi) or Saturday (Samedi)**
+- All date validation enforces this 5-day week structure
+
 ## Variables disponibles
 
 Le template Word doit utiliser les balises suivantes pour afficher correctement les données :
@@ -33,11 +38,11 @@ Le template doit contenir une boucle pour afficher chaque jour :
 {
   "semaine": 15,
   "classe": "6A",
-  "plageSemaine": "du Dimanche 30 Novembre 2025 à Jeudi 04 Décembre 2025",
+  "plageSemaine": "du Dimanche 07 Décembre 2025 à Jeudi 11 Décembre 2025",
   "notes": {...formatted text...},
   "jours": [
     {
-      "jourDateComplete": "Dimanche 30 Novembre 2025",
+      "jourDateComplete": "Dimanche 07 Décembre 2025",
       "matieres": [
         {
           "matiere": "Mathématiques",
@@ -49,12 +54,26 @@ Le template doit contenir une boucle pour afficher chaque jour :
       ]
     },
     {
-      "jourDateComplete": "Lundi 01 Décembre 2025",
+      "jourDateComplete": "Lundi 08 Décembre 2025",
+      "matieres": [...]
+    },
+    {
+      "jourDateComplete": "Mardi 09 Décembre 2025",
+      "matieres": [...]
+    },
+    {
+      "jourDateComplete": "Mercredi 10 Décembre 2025",
+      "matieres": [...]
+    },
+    {
+      "jourDateComplete": "Jeudi 11 Décembre 2025",
       "matieres": [...]
     }
   ]
 }
 ```
+
+**Note:** Only 5 days (Sunday to Thursday) are included in each week.
 
 ## Format des textes formatés
 
