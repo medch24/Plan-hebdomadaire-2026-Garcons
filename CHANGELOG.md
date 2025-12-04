@@ -4,16 +4,20 @@
 
 ### 🐛 Issues Fixed
 
-1. **Saturday (Samedi) Validation Error**
-   - **Problem:** System was allowing Friday (Vendredi) and Saturday (Samedi) to be processed
-   - **Root Cause:** School week is only 5 days (Sunday to Thursday), but validation allowed all 7 days
-   - **Fix:** Added strict validation to reject Friday and Saturday in all date parsing functions
+1. **Saturday (Samedi) Validation Error - ROOT CAUSE FOUND**
+   - **Problem:** Saturday and Friday were appearing in the UI and Word documents
+   - **Root Cause:** Frontend script.js was using 7-day arrays instead of 5-day school week
+   - **Fix:** Updated all day arrays in script.js from 7 to 5 days (all languages: FR, AR, EN)
 
-2. **Date Format Inconsistencies**
+2. **Backend Date Validation**
+   - **Problem:** Backend was accepting Friday/Saturday from frontend
+   - **Fix:** Added strict server-side validation to reject Friday and Saturday
+
+3. **Date Format Inconsistencies**
    - **Problem:** Inconsistent date handling across different formats
    - **Fix:** Enhanced date parsing for all formats (French full date, ISO, DD/MM/YYYY)
 
-3. **Word Document Generation**
+4. **Word Document Generation**
    - **Problem:** Incorrect date ranges being passed to templates
    - **Fix:** Added validation to ensure only valid school days are included
 
@@ -77,9 +81,14 @@ console.log(end.getUTCDay());   // 4 (Thursday)
 
 ### 📝 Files Modified
 
+**Commit 1 (76c7e27):** Backend fixes
 - `api/index.js` - Core date validation and Word generation logic
 - `WORD_TEMPLATE_STRUCTURE.md` - Updated documentation
 - `CHANGELOG.md` - This file (new)
+
+**Commit 2 (6f93fb5):** Frontend fixes (CRITICAL)
+- `public/script.js` - Fixed day arrays from 7 to 5 days in all languages
+- Removed Friday/Saturday from all date validation and display logic
 
 ### 🚀 Deployment Notes
 
