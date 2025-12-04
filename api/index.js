@@ -359,6 +359,27 @@ function correctDatesForWeek(data, weekNumber) {
   });
   
   console.log(`✅ ${correctionCount} dates corrigées sur ${data.length} lignes`);
+  
+  // Vérifier que tous les jours de la semaine sont présents
+  const daysCount = {};
+  correctedData.forEach(row => {
+    const jourValue = row[jourKey];
+    if (jourValue) {
+      if (!daysCount[jourValue]) daysCount[jourValue] = 0;
+      daysCount[jourValue]++;
+    }
+  });
+  
+  console.log('📊 Répartition des jours:');
+  const dayOrder = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
+  dayOrder.forEach((dayName, idx) => {
+    const correctDate = new Date(weekStart);
+    correctDate.setUTCDate(weekStart.getUTCDate() + idx);
+    const formattedDate = formatDateFrenchNode(correctDate);
+    const count = daysCount[formattedDate] || 0;
+    console.log(`  ${dayName} (${formattedDate}): ${count} lignes ${count === 0 ? '⚠️ MANQUANT' : ''}`);
+  });
+  
   return correctedData;
 }
 
@@ -695,15 +716,15 @@ app.post('/api/generate-excel-workbook', async (req, res) => {
         const itemKey = findKey(item, header);
         let value = itemKey ? item[itemKey] : '';
         
-        // Pour la colonne "Jour", stocker l'objet Date au lieu du texte
+        // Pour la colonne "Jour", convertir en texte français au lieu d'objet Date
         if (header === 'Jour' && value && weekStartDateNode && !isNaN(weekStartDateNode.getTime())) {
-          const dateOfDay = getDateForDayNameNode(weekStartDateNode, value);
-          if (dateOfDay) {
+          const parsed = parseDateFromJourValue(value, weekStartDateNode);
+          if (parsed && parsed.date) {
             // Validate: Only school days (Sunday to Thursday)
-            const dayOfWeek = dateOfDay.getUTCDay();
+            const dayOfWeek = parsed.date.getUTCDay();
             if (dayOfWeek >= 0 && dayOfWeek <= 4) {
-              // Stocker l'objet Date JavaScript pour Excel
-              value = dateOfDay;
+              // Convertir en texte français au lieu d'objet Date
+              value = formatDateFrenchNode(parsed.date);
             } else {
               console.warn(`⚠️ Invalid school day skipped in Excel: ${value} (day ${dayOfWeek})`);
               value = `[INVALID] ${value}`;
@@ -721,23 +742,12 @@ app.post('/api/generate-excel-workbook', async (req, res) => {
     
     // Définir les largeurs de colonnes
     worksheet['!cols'] = [
-      { wch: 20 }, { wch: 25 }, { wch: 10 }, { wch: 12 }, { wch: 20 },
+      { wch: 20 }, { wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 20 },
       { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 45 }
     ];
     
-    // Appliquer le format de date français à la colonne "Jour" (colonne B)
-    // Format Excel : "dddd dd mmmm yyyy" = "Mercredi 03 Décembre 2025"
-    const dateFormat = 'dddd dd mmmm yyyy';
-    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-    
-    // Parcourir toutes les lignes de la colonne "Jour" (colonne B = index 1)
-    for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: rowNum, c: 1 }); // colonne B (index 1)
-      const cell = worksheet[cellAddress];
-      if (cell && cell.t === 'n') { // Si c'est un nombre (date Excel)
-        cell.z = dateFormat; // Appliquer le format de date
-      }
-    }
+    // Les dates sont déjà en texte français (formatDateFrenchNode), pas besoin de formater
+    console.log(`✅ Excel généré avec ${formattedData.length} lignes (dates en français)`);
     
     XLSX.utils.book_append_sheet(workbook, worksheet, `Plan S${weekNumber}`);
 
