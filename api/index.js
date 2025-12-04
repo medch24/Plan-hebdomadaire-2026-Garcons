@@ -280,6 +280,88 @@ function validateWeekDateRanges() {
   return errors === 0;
 }
 
+// ------------------------- Correction automatique des dates -------------------------
+
+/**
+ * Corrige automatiquement les dates dans les données pour qu'elles correspondent
+ * à la semaine scolaire (Dimanche → Jeudi uniquement)
+ */
+function correctDatesForWeek(data, weekNumber) {
+  if (!Array.isArray(data) || data.length === 0) return data;
+  
+  // Récupérer les dates de la semaine
+  const weekRange = specificWeekDateRangesNode[weekNumber];
+  if (!weekRange) {
+    console.warn(`⚠️ Aucune plage de dates définie pour la semaine ${weekNumber}`);
+    return data;
+  }
+  
+  const [startStr, endStr] = weekRange;
+  const weekStart = new Date(startStr + 'T00:00:00.000Z');
+  const weekEnd = new Date(endStr + 'T00:00:00.000Z');
+  
+  // Valider que la semaine commence bien Dimanche et finit Jeudi
+  if (weekStart.getUTCDay() !== 0) {
+    console.error(`❌ ERREUR: La semaine ${weekNumber} ne commence pas un Dimanche!`);
+    return data;
+  }
+  if (weekEnd.getUTCDay() !== 4) {
+    console.error(`❌ ERREUR: La semaine ${weekNumber} ne finit pas un Jeudi!`);
+    return data;
+  }
+  
+  console.log(`🔧 Correction des dates pour semaine ${weekNumber}: ${formatDateFrenchNode(weekStart)} → ${formatDateFrenchNode(weekEnd)}`);
+  
+  // Créer un mapping période → date
+  // 8 périodes par jour, 5 jours (Dimanche → Jeudi)
+  const periodeToDayIndex = (periode) => {
+    const p = parseInt(periode, 10);
+    if (isNaN(p) || p < 1 || p > 40) return null;
+    return Math.floor((p - 1) / 8); // 0=Dimanche, 1=Lundi, ..., 4=Jeudi
+  };
+  
+  // Trouver la clé "Jour" et "Période" (insensible à la casse)
+  const jourKey = Object.keys(data[0] || {}).find(k => k.toLowerCase().trim() === 'jour');
+  const periodeKey = Object.keys(data[0] || {}).find(k => k.toLowerCase().trim() === 'période');
+  
+  if (!jourKey) {
+    console.warn(`⚠️ Colonne "Jour" introuvable, correction impossible`);
+    return data;
+  }
+  
+  let correctionCount = 0;
+  const correctedData = data.map(row => {
+    const periode = row[periodeKey];
+    const dayIndex = periodeToDayIndex(periode);
+    
+    if (dayIndex !== null && dayIndex >= 0 && dayIndex <= 4) {
+      // Calculer la date correcte
+      const correctDate = new Date(weekStart);
+      correctDate.setUTCDate(weekStart.getUTCDate() + dayIndex);
+      
+      // Formater la date correcte
+      const formattedDate = formatDateFrenchNode(correctDate);
+      
+      // Comparer avec la date actuelle
+      const currentJour = row[jourKey];
+      if (currentJour !== formattedDate) {
+        console.log(`  📝 Correction P${periode}: "${currentJour}" → "${formattedDate}"`);
+        correctionCount++;
+      }
+      
+      return {
+        ...row,
+        [jourKey]: formattedDate
+      };
+    }
+    
+    return row;
+  });
+  
+  console.log(`✅ ${correctionCount} dates corrigées sur ${data.length} lignes`);
+  return correctedData;
+}
+
 // ------------------------- Auth & CRUD simples -------------------------
 
 app.post('/api/login', (req, res) => {
@@ -318,13 +400,16 @@ app.post('/api/save-plan', async (req, res) => {
   const data = req.body.data;
   if (isNaN(weekNumber) || !Array.isArray(data)) return res.status(400).json({ message: 'Données invalides.' });
   try {
+    // Corriger les dates avant de sauvegarder
+    const correctedData = correctDatesForWeek(data, weekNumber);
+    
     const db = await connectToDatabase();
     await db.collection('plans').updateOne(
       { week: weekNumber },
-      { $set: { data: data } },
+      { $set: { data: correctedData } },
       { upsert: true }
     );
-    res.status(200).json({ message: `Plan S${weekNumber} enregistré.` });
+    res.status(200).json({ message: `Plan S${weekNumber} enregistré avec ${correctedData.length} lignes.` });
   } catch (error) {
     console.error('Erreur MongoDB /save-plan:', error);
     res.status(500).json({ message: 'Erreur serveur.' });
