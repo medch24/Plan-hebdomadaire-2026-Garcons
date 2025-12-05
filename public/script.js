@@ -193,6 +193,16 @@
                         td.textContent = content; // Utiliser textContent pour préserver les sauts de ligne
                         td.spellcheck = true;
                         applyRTLToElement(td, content); // Appliquer le style RTL si nécessaire
+                        
+                        // Nettoyer les sauts de ligne indésirables lors du collage
+                        td.addEventListener('paste', (e) => {
+                            e.preventDefault();
+                            const text = (e.clipboardData || window.clipboardData).getData('text');
+                            // Supprimer les espaces avant/après et les sauts de ligne multiples
+                            const cleanedText = text.trim().replace(/\s+$/gm, '').replace(/^\s+/gm, '');
+                            document.execCommand('insertText', false, cleanedText);
+                        });
+                        
                         td.addEventListener('input', (e) => {
                             // ### CORRECTION : Utiliser innerText pour lire les sauts de ligne lors de la modification
                             if (rowObj) {

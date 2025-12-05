@@ -31,6 +31,10 @@ const formatTextForWord = (text, options = {}) => {
   if (!text || typeof text !== 'string' || text.trim() === '') {
     return '<w:p/>';
   }
+  
+  // Nettoyer le texte : supprimer les espaces/sauts de ligne avant et après
+  const cleanedText = text.trim();
+  
   const { color, italic } = options;
   const runPropertiesParts = [];
   runPropertiesParts.push('<w:sz w:val="22"/><w:szCs w:val="22"/>');
@@ -38,13 +42,16 @@ const formatTextForWord = (text, options = {}) => {
   if (italic) runPropertiesParts.push('<w:i/><w:iCs w:val="true"/>');
 
   let paragraphProperties = '';
-  if (containsArabic(text)) {
-    paragraphProperties = '<w:pPr><w:bidi/><w:jc w:val="right"/></w:pPr>';
+  if (containsArabic(cleanedText)) {
+    // Pour le texte arabe : RTL + centré
+    paragraphProperties = '<w:pPr><w:bidi/><w:jc w:val="center"/></w:pPr>';
     runPropertiesParts.push('<w:rtl/>');
   }
 
   const runProperties = `<w:rPr>${runPropertiesParts.join('')}</w:rPr>`;
-  const lines = text.split(/\r\n|\n|\r/);
+  
+  // Conserver uniquement les sauts de ligne intentionnels de l'enseignant
+  const lines = cleanedText.split(/\r\n|\n|\r/);
   const content = lines
     .map(line => `<w:t xml:space="preserve">${xmlEscape(line)}</w:t>`)
     .join('<w:br/>');
