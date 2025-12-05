@@ -194,12 +194,12 @@
                         td.spellcheck = true;
                         applyRTLToElement(td, content); // Appliquer le style RTL si nécessaire
                         
-                        // Nettoyer les sauts de ligne indésirables lors du collage
+                        // Nettoyer TOUS les sauts de ligne lors du collage (copier-coller externe)
                         td.addEventListener('paste', (e) => {
                             e.preventDefault();
                             const text = (e.clipboardData || window.clipboardData).getData('text');
-                            // Supprimer les espaces avant/après et les sauts de ligne multiples
-                            const cleanedText = text.trim().replace(/\s+$/gm, '').replace(/^\s+/gm, '');
+                            // Supprimer TOUS les sauts de ligne et espaces superflus
+                            const cleanedText = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
                             document.execCommand('insertText', false, cleanedText);
                         });
                         

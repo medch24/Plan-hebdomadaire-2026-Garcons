@@ -24,6 +24,33 @@
         td.editable {
             white-space: pre-wrap;
         }
+        
+        /* Optimisation pour affichage 100% */
+        #main-content {
+            max-width: 100%;
+            padding: 10px;
+        }
+        
+        .table-responsive-wrapper {
+            margin: 0 auto;
+            max-width: 100%;
+        }
+        
+        /* R\u00e9duire la largeur des colonnes fixes */
+        #planTable th:nth-child(1),
+        #planTable td:nth-child(1) { width: 100px; } /* Enseignant */
+        
+        #planTable th:nth-child(2),
+        #planTable td:nth-child(2) { width: 80px; } /* Classe */
+        
+        #planTable th:nth-child(3),
+        #planTable td:nth-child(3) { width: 120px; } /* Mati\u00e8re */
+        
+        #planTable th:nth-child(4),
+        #planTable td:nth-child(4) { width: 60px; } /* P\u00e9riode */
+        
+        #planTable th:nth-child(5),
+        #planTable td:nth-child(5) { width: 100px; } /* Jour */
     </style>
 </head>
 <body dir="ltr">
