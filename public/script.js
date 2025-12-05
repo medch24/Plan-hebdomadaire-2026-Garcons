@@ -287,6 +287,22 @@
             updateActionButtonsState(false);
             
             displayAlert('welcome_user', false, { user: loggedInUser });
+            
+            // Initialiser les notifications push
+            if (typeof window.NotificationManager !== 'undefined') {
+                console.log('🔔 Initialisation des notifications push...');
+                setTimeout(() => {
+                    window.NotificationManager.initialize(loggedInUser).catch(err => {
+                        console.error('❌ Erreur initialisation notifications:', err);
+                    });
+                }, 1000); // Délai pour laisser l'UI se charger
+                
+                // Ajouter le bouton de gestion des notifications
+                const userActionsContainer = document.querySelector('.user-actions-container');
+                if (userActionsContainer && !document.getElementById('notification-toggle-btn')) {
+                    window.NotificationManager.createToggleButton(loggedInUser, userActionsContainer);
+                }
+            }
         }
         
         async function handleLogin() {
