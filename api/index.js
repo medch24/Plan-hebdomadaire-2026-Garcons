@@ -122,6 +122,26 @@ function formatDateFrenchNode(date) {
   const yearNum = date.getUTCFullYear();
   return `${dayName} ${dayNum} ${monthName} ${yearNum}`;
 }
+function extractDayNameFromString(dayString) {
+  if (!dayString || typeof dayString !== 'string') return null;
+  const trimmed = dayString.trim();
+  const dayNames = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
+  
+  // Check if it's already just a day name
+  if (dayNames.includes(trimmed)) {
+    return trimmed;
+  }
+  
+  // Extract day name from formatted date (e.g., "Dimanche 07 Décembre 2025")
+  for (const dayName of dayNames) {
+    if (trimmed.startsWith(dayName)) {
+      return dayName;
+    }
+  }
+  
+  return null;
+}
+
 function getDateForDayNameNode(weekStartDate, dayName) {
   if (!weekStartDate || isNaN(weekStartDate.getTime())) return null;
   const dayOrder = { "Dimanche": 0, "Lundi": 1, "Mardi": 2, "Mercredi": 3, "Jeudi": 4 };
@@ -522,20 +542,27 @@ app.post('/api/full-report-by-class', async (req, res) => {
 
 app.post('/api/generate-ai-lesson-plan', async (req, res) => {
   try {
+    console.log('📝 [AI Lesson Plan] Nouvelle demande de génération');
+    
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     if (!GEMINI_API_KEY) {
+      console.error('❌ [AI Lesson Plan] Clé API GEMINI manquante');
       return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });
     }
 
     const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL || LESSON_TEMPLATE_URL;
     if (!lessonTemplateUrl) {
+      console.error('❌ [AI Lesson Plan] URL du template de leçon manquante');
       return res.status(503).json({ message: "L'URL du modèle de leçon Word n'est pas configurée." });
     }
 
     const { week, rowData } = req.body;
     if (!rowData || typeof rowData !== 'object' || !week) {
+      console.error('❌ [AI Lesson Plan] Données invalides:', { week, hasRowData: !!rowData });
       return res.status(400).json({ message: "Les données de la ligne ou de la semaine sont manquantes." });
     }
+    
+    console.log(`✅ [AI Lesson Plan] Génération pour semaine ${week}`);
 
     // Charger le modèle Word
     let templateBuffer;
@@ -558,6 +585,8 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
     const support = rowData[findKey(rowData, 'Support')] || 'Non spécifié';
     const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
     const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
+    
+    console.log(`📚 [AI Lesson Plan] Données: ${enseignant} | ${classe} | ${matiere} | ${lecon}`);
 
     // Date formatée
     let formattedDate = "";
@@ -566,8 +595,12 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
     if (jour && datesNode?.start) {
       const weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
       if (!isNaN(weekStartDateNode.getTime())) {
-        const dateOfDay = getDateForDayNameNode(weekStartDateNode, jour);
-        if (dateOfDay) formattedDate = formatDateFrenchNode(dateOfDay);
+        // Extract day name from the jour field (in case it contains a full date)
+        const dayName = extractDayNameFromString(jour);
+        if (dayName) {
+          const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
+          if (dateOfDay) formattedDate = formatDateFrenchNode(dateOfDay);
+        }
       }
     }
 
@@ -611,7 +644,10 @@ ${jsonStructure}`;
     }
 
     // === Résolution dynamique du modèle compatible v1 ===
+    console.log('🤖 [AI Lesson Plan] Résolution du modèle Gemini...');
     const MODEL_NAME = await resolveGeminiModel(GEMINI_API_KEY);
+    console.log(`🤖 [AI Lesson Plan] Modèle sélectionné: ${MODEL_NAME}`);
+    
     const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
 
     const requestBody = {
@@ -621,6 +657,7 @@ ${jsonStructure}`;
       // Pas de generationConfig pour éviter les 400 sur certains déploiements
     };
 
+    console.log('🔄 [AI Lesson Plan] Appel à l\'API Gemini...');
     const aiResponse = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -629,9 +666,11 @@ ${jsonStructure}`;
 
     if (!aiResponse.ok) {
       const errorBody = await aiResponse.json().catch(() => ({}));
-      console.error("Erreur de l'API Google AI:", JSON.stringify(errorBody, null, 2));
+      console.error("❌ [AI Lesson Plan] Erreur de l'API Google AI:", JSON.stringify(errorBody, null, 2));
       throw new Error(`[${aiResponse.status} ${aiResponse.statusText}] ${errorBody.error?.message || "Erreur inconnue de l'API."}`);
     }
+    
+    console.log('✅ [AI Lesson Plan] Réponse reçue de Gemini');
 
     const aiResult = await aiResponse.json();
 
@@ -699,9 +738,11 @@ ${jsonStructure}`;
     };
 
     const filename = `Plan de lecon-${sanitizeForFilename(matiere)}-${sanitizeForFilename(seance)}-${sanitizeForFilename(classe)}-Semaine${weekNumber}.docx`;
+    console.log(`📄 [AI Lesson Plan] Envoi du fichier: ${filename}`);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.send(buf);
+    console.log('✅ [AI Lesson Plan] Génération terminée avec succès');
 
   } catch (error) {
     console.error('❌ Erreur serveur /generate-ai-lesson-plan:', error);
