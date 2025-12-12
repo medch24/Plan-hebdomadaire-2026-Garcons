@@ -390,8 +390,8 @@
                 document.getElementById('lesson-plan-generator').style.display = 'flex';
             } else {
                 document.getElementById('admin-actions').style.display = 'none';
-            }
                 document.getElementById('lesson-plan-generator').style.display = 'none';
+            }
             
             currentWeek = null;
             planData = [];
