@@ -805,8 +805,37 @@ app.post('/api/unsubscribe-push', async (req, res) => {
   }
 });
 
+// Messages multilingues pour les notifications
+const notificationMessages = {
+  fr: {
+    title: '⚠️ Plan Hebdomadaire Incomplet',
+    body: (teacher, week, classes) => `Bonjour ${teacher}, votre plan pour la semaine ${week} est incomplet pour: ${classes}. Veuillez le compléter.`,
+    reminderTitle: '📋 Rappel: Finaliser le Plan Hebdomadaire',
+    reminderBody: (teacher, week) => `Bonjour ${teacher}, n'oubliez pas de finaliser votre plan pour la semaine ${week}.`
+  },
+  ar: {
+    title: '⚠️ الخطة الأسبوعية غير مكتملة',
+    body: (teacher, week, classes) => `مرحباً ${teacher}، خطتك للأسبوع ${week} غير مكتملة للفصول: ${classes}. يرجى إكمالها.`,
+    reminderTitle: '📋 تذكير: أكمل الخطة الأسبوعية',
+    reminderBody: (teacher, week) => `مرحباً ${teacher}، لا تنسى إكمال خطتك للأسبوع ${week}.`
+  },
+  en: {
+    title: '⚠️ Incomplete Weekly Plan',
+    body: (teacher, week, classes) => `Hello ${teacher}, your plan for week ${week} is incomplete for: ${classes}. Please complete it.`,
+    reminderTitle: '📋 Reminder: Finalize Weekly Plan',
+    reminderBody: (teacher, week) => `Hello ${teacher}, don't forget to finalize your plan for week ${week}.`
+  }
+};
+
+// Déterminer la langue d'un enseignant
+function getTeacherLanguage(teacher) {
+  if (arabicTeachers.includes(teacher)) return 'ar';
+  if (englishTeachers.includes(teacher)) return 'en';
+  return 'fr';
+}
+
 // Vérifier les enseignants incomplets et envoyer des notifications
-// Cette route sera appelée par un CRON job chaque mardi
+// Cette route sera appelée par un CRON job chaque LUNDI (3 fois par jour)
 app.post('/api/check-incomplete-and-notify', async (req, res) => {
   try {
     const { apiKey } = req.body;
@@ -871,21 +900,30 @@ app.post('/api/check-incomplete-and-notify', async (req, res) => {
     let notificationsSent = 0;
     const notificationResults = [];
 
-    // Envoyer des notifications à chaque enseignant incomplet
+    // Envoyer des notifications à chaque enseignant incomplet avec leur langue
     for (const teacher of teachersToNotify) {
       const subscription = subscriptions.find(sub => sub.username === teacher);
       
       if (subscription && subscription.subscription) {
         const classes = [...incompleteTeachers[teacher]].sort().join(', ');
+        const lang = getTeacherLanguage(teacher);
+        const msgs = notificationMessages[lang];
+        
         const message = {
-          title: '⚠️ Plan Hebdomadaire Incomplet',
-          body: `Bonjour ${teacher}, votre plan pour la semaine ${currentWeek} est incomplet pour: ${classes}. Veuillez le compléter.`,
+          title: msgs.title,
+          body: msgs.body(teacher, currentWeek, classes),
           icon: 'https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299',
+          badge: 'https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299',
+          requireInteraction: true,
+          vibrate: [200, 100, 200, 100, 200],
+          tag: `plan-reminder-${currentWeek}`,
           data: {
             url: 'https://plan-hebdomadaire-2026-boys.vercel.app',
             week: currentWeek,
             teacher: teacher,
-            classes: classes
+            classes: classes,
+            lang: lang,
+            playSound: true
           }
         };
 
@@ -898,12 +936,13 @@ app.post('/api/check-incomplete-and-notify', async (req, res) => {
           notificationResults.push({
             teacher: teacher,
             classes: classes,
+            language: lang,
             status: 'sent',
             message: message
           });
           
           notificationsSent++;
-          console.log(`✅ Notification envoyée à ${teacher} pour ${classes}`);
+          console.log(`✅ Notification envoyée à ${teacher} (${lang}) pour ${classes}`);
         } catch (error) {
           console.error(`❌ Erreur notification pour ${teacher}:`, error);
           notificationResults.push({

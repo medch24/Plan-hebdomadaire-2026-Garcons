@@ -173,10 +173,24 @@
                 <span id="notes-save-status" style="font-size: 0.9em;"></span>
             </div>
         </div>
+        <!-- Interface de génération des plans de leçon (coordinateur seulement) -->
+        <div id="lesson-plan-generator" class="filter-container admin-section" style="display: none;">
+            <h3 id="lesson-plan-title">Génération des Plans de Leçon (Coordinateur)</h3>
+            <div>
+                <label for="lessonPlanClassSelector" id="lesson-plan-class-label"><i class="fas fa-school"></i> Choisir une Classe :</label>
+                <select id="lessonPlanClassSelector" onchange="updateLessonPlanSubjects()">
+                    <option value="">-- Sélectionnez une classe --</option>
+                </select>
+            </div>
+            <div id="lesson-plan-subjects-container" style="display: none; margin-top: 10px;">
+                <label id="lesson-plan-subjects-label"><i class="fas fa-book"></i> Matières à générer (Exclu: Matières Arabes) :</label>
+                <div id="lessonPlanSubjectsList" style="margin-top: 5px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
+                <button id="generateSelectedLessonsBtn" onclick="generateSelectedLessonPlans()" class="action-button pro-button success-button" style="margin-top: 10px;" disabled>
+                    <i class="fas fa-robot"></i> <span class="btn-text">Générer Plans de Leçon Sélectionnés</span>
+                </button>
+            </div>
+        </div>
         <div class="table-actions-container">
-            <button id="generateAllAIBtn" onclick="generateAllAILessonPlans()" class="action-button pro-button" disabled>
-                <i class="fas fa-robot"></i> <span class="btn-text">Générer Tous les Plans (IA)</span>
-            </button>
             <button id="saveAllDisplayedBtn" onclick="saveAllDisplayedRows()" class="action-button save-all-button pro-button success-button" disabled>
                 <i class="fas fa-save"></i> <span class="btn-text">Enregistrer Lignes Affichées</span>
             </button>

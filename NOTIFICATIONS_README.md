@@ -2,21 +2,24 @@
 
 ## Vue d'ensemble
 
-Ce système permet d'envoyer automatiquement des notifications push aux enseignants de la section garçons qui n'ont pas complété leur plan hebdomadaire. Les notifications sont envoyées **chaque mardi à 9h00 (heure d'Arabie Saoudite)**.
+Ce système permet d'envoyer automatiquement des notifications push aux enseignants de la section garçons qui n'ont pas complété leur plan hebdomadaire. Les notifications sont envoyées **chaque lundi à 9h00, 14h00 et 18h00 (heure d'Arabie Saoudite)** avec un son de bip et dans la langue de chaque enseignant (français, arabe ou anglais).
 
 ## Fonctionnalités
 
 ### ✅ Notifications Automatiques
-- Vérification automatique chaque mardi
+- Vérification automatique **chaque lundi à 9h00, 14h00 et 18h00**
 - Détection des enseignants avec travaux incomplets
-- Envoi de notifications push personnalisées
+- Envoi de notifications push personnalisées **multilingues** (FR/AR/EN)
+- Son de bip audible même si le site n'est pas ouvert
 - Liste des classes concernées pour chaque enseignant
+- Notifications persistantes même si le navigateur est fermé (tant que l'utilisateur n'est pas déconnecté)
 
 ### ✅ Gestion Côté Utilisateur
-- Bouton pour activer/désactiver les notifications
+- **Pas de bouton d'activation/désactivation** - Les notifications sont **automatiquement activées** lors de la connexion
 - Permission demandée lors de la première utilisation
 - Abonnement persistant (stocké en base de données)
-- Notification de test disponible
+- Notification de test disponible (administrateur uniquement)
+- **Notifications actives tant que l'utilisateur ne se déconnecte pas**
 
 ### ✅ Sécurité
 - Authentification par clé API pour le CRON
@@ -79,14 +82,16 @@ Service Worker pour gérer la réception des notifications push.
    - Un message de confirmation s'affiche
 
 2. **Réception des Notifications**
-   - Chaque mardi à 9h00, une vérification automatique est effectuée
-   - Si votre plan n'est pas complet, vous recevez une notification
+   - **Chaque lundi à 9h00, 14h00 et 18h00**, une vérification automatique est effectuée
+   - Si votre plan n'est pas complet, vous recevez une notification **dans votre langue** (FR/AR/EN)
    - La notification indique les classes concernées
+   - **Un son de bip** est émis pour attirer votre attention
    - Cliquer sur la notification ouvre l'application
+   - Les notifications fonctionnent même si l'application n'est pas ouverte
 
 3. **Désactivation**
-   - Cliquer sur le bouton "🔔 Désactiver Notifications"
-   - Vous ne recevrez plus de notifications automatiques
+   - **Se déconnecter de l'application** pour ne plus recevoir de notifications
+   - Les notifications sont réactivées automatiquement lors de la prochaine connexion
 
 ### Pour les Administrateurs
 
@@ -123,18 +128,18 @@ Le CRON est configuré dans `vercel.json` :
   "crons": [
     {
       "path": "/api/check-incomplete-and-notify",
-      "schedule": "0 6 * * 2"
+      "schedule": "0 6,11,15 * * 1"
     }
   ]
 }
 ```
 
-**Schedule** : `0 6 * * 2`
+**Schedule** : `0 6,11,15 * * 1`
 - `0` : Minute 0
-- `6` : 6h00 UTC = 9h00 Arabia Standard Time (UTC+3)
+- `6,11,15` : 6h00, 11h00 et 15h00 UTC = **9h00, 14h00 et 18h00** Arabia Standard Time (UTC+3)
 - `*` : Tous les jours du mois
 - `*` : Tous les mois
-- `2` : Mardi (0=dimanche, 1=lundi, 2=mardi...)
+- `1` : **Lundi** (0=dimanche, 1=lundi, 2=mardi...)
 
 ⚠️ **Important** : Vercel CRON n'est disponible que sur les plans Pro. Pour les plans Hobby, utilisez les alternatives dans `CRON_SETUP.md`.
 

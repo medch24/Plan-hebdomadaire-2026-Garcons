@@ -234,6 +234,15 @@
                 indicatorSpan.innerHTML = '<i class="fas fa-check-circle"></i>';
                 indicatorSpan.style.display = rowObj && updK && rowObj[updK] ? 'inline-block' : 'none';
                 actTd.appendChild(indicatorSpan);
+                
+                // Ajouter bouton pour télécharger le plan de leçon (toujours disponible)
+                const lessonBtn = document.createElement('button');
+                lessonBtn.innerHTML = '<i class="fas fa-file-download"></i>';
+                lessonBtn.title = 'Télécharger Plan de Leçon';
+                lessonBtn.classList.add('lesson-plan-button');
+                lessonBtn.style.marginLeft = '5px';
+                lessonBtn.onclick = () => downloadLessonPlan(rowObj);
+                actTd.appendChild(lessonBtn);
                 tr.appendChild(actTd);
                 if (updK && tHead && tHead.querySelector('.updated-at-column')) {
                     const updTd = document.createElement('td');
@@ -358,9 +367,12 @@
             if (loggedInUser === 'Mohamed') { 
                 document.getElementById('admin-actions').style.display = 'flex';
                 populateAdminReportClassSelector();
+                document.getElementById('lesson-plan-generator').style.display = 'flex';
+                populateLessonPlanClassSelector();
             } else {
                 document.getElementById('admin-actions').style.display = 'none';
             }
+                document.getElementById('lesson-plan-generator').style.display = 'none';
             
             currentWeek = null;
             planData = [];
@@ -389,8 +401,8 @@
                 
                 // Ajouter le bouton de gestion des notifications
                 const userActionsContainer = document.querySelector('.user-actions-container');
-                if (userActionsContainer && !document.getElementById('notification-toggle-btn')) {
-                    window.NotificationManager.createToggleButton(loggedInUser, userActionsContainer);
+//                 if (userActionsContainer && !document.getElementById('notification-toggle-btn')) {
+//                     window.NotificationManager.createToggleButton(loggedInUser, userActionsContainer);
                 }
             }
         }
@@ -514,5 +526,264 @@
             const saveNotesBtn = document.getElementById('saveNotesBtn');
             if (saveNotesBtn) saveNotesBtn.disabled = true;
         });
+
+        // ==================== FONCTIONS POUR PLANS DE LEÇON (COORDINATEUR) ====================
+        
+        // Download lesson plan for a specific row
+        async function downloadLessonPlan(rowData) {
+            if (!rowData || !currentWeek) {
+                displayAlert('Données manquantes pour télécharger le plan de leçon.', true);
+                return;
+            }
+            
+            console.log("Téléchargement du plan de leçon pour:", rowData);
+            
+            try {
+                const response = await fetch('/api/generate-ai-lesson-plan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ week: currentWeek, rowData: rowData })
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const contentDisposition = response.headers.get('content-disposition');
+                    let filename = `plan_lecon_S${currentWeek}.docx`;
+                    if (contentDisposition) {
+                        const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(;|$)/i);
+                        if (filenameMatch && filenameMatch[1]) {
+                            filename = filenameMatch[1];
+                        }
+                    }
+                    
+                    if (typeof saveAs === 'function') {
+                        saveAs(blob, filename);
+                        displayAlert('Plan de leçon téléchargé avec succès !', false);
+                    }
+                } else {
+                    const errorResult = await response.json().catch(() => ({ message: "Erreur inconnue" }));
+                    throw new Error(errorResult.message || `Erreur serveur ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Erreur téléchargement plan de leçon:', error);
+                displayAlert('Erreur lors du téléchargement du plan de leçon.', true);
+            }
+        }
+        
+        // ==================== FONCTIONS POUR PLANS DE LEÇON (COORDINATEUR) ====================
+        
+        // Populate lesson plan class selector (coordinateur uniquement)
+        async function populateLessonPlanClassSelector() {
+            const select = document.getElementById('lessonPlanClassSelector');
+            if (!select) return;
+            
+            select.innerHTML = `<option value="">${t('select_class')}</option>`;
+            select.disabled = true;
+            
+            try {
+                const response = await fetch('/api/all-classes');
+                if (!response.ok) throw new Error(`Erreur serveur ${response.status}`);
+                const classes = await response.json();
+                
+                if (classes && classes.length > 0) {
+                    classes.sort(compareClasses).forEach(cls => {
+                        const opt = document.createElement('option');
+                        opt.value = cls;
+                        const ar = classTranslations[cls];
+                        opt.textContent = ar ? `${ar} (${cls})` : cls;
+                        select.appendChild(opt);
+                    });
+                    select.disabled = false;
+                }
+            } catch (error) {
+                console.error("Erreur chargement des classes pour les plans de leçon:", error);
+            }
+        }
+        
+        // Update lesson plan subjects based on selected class
+        function updateLessonPlanSubjects() {
+            const classSelect = document.getElementById('lessonPlanClassSelector');
+            const subjectsContainer = document.getElementById('lesson-plan-subjects-container');
+            const subjectsList = document.getElementById('lessonPlanSubjectsList');
+            const generateBtn = document.getElementById('generateSelectedLessonsBtn');
+            
+            const selectedClass = classSelect.value;
+            
+            if (!selectedClass || !currentWeek || !planData || planData.length === 0) {
+                subjectsContainer.style.display = 'none';
+                return;
+            }
+            
+            // Get all unique subjects for the selected class, excluding Arabic subjects
+            const classKey = findHKey('Classe');
+            const matiereKey = findHKey('Matière');
+            const arabicSubjects = ['Arabe', 'القرآن', 'Coran', 'التجويد', 'Tajwid', 'الحديث', 'Hadith'];
+            
+            const subjects = new Set();
+            planData.forEach(item => {
+                if (item[classKey] === selectedClass && item[matiereKey]) {
+                    const subject = item[matiereKey];
+                    // Exclude Arabic subjects
+                    const isArabic = arabicSubjects.some(ar => subject.includes(ar) || ar.includes(subject));
+                    if (!isArabic) {
+                        subjects.add(subject);
+                    }
+                }
+            });
+            
+            if (subjects.size === 0) {
+                subjectsContainer.style.display = 'none';
+                return;
+            }
+            
+            // Display subjects as checkboxes
+            subjectsList.innerHTML = '';
+            [...subjects].sort().forEach(subject => {
+                const label = document.createElement('label');
+                label.style.display = 'flex';
+                label.style.alignItems = 'center';
+                label.style.cursor = 'pointer';
+                label.style.padding = '5px 10px';
+                label.style.border = '1px solid #ddd';
+                label.style.borderRadius = '5px';
+                label.style.minWidth = '150px';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = subject;
+                checkbox.style.marginRight = '5px';
+                checkbox.addEventListener('change', updateGenerateButtonState);
+                
+                const text = document.createTextNode(subject);
+                
+                label.appendChild(checkbox);
+                label.appendChild(text);
+                subjectsList.appendChild(label);
+            });
+            
+            subjectsContainer.style.display = 'block';
+            updateGenerateButtonState();
+        }
+        
+        // Update generate button state based on checkbox selection
+        function updateGenerateButtonState() {
+            const generateBtn = document.getElementById('generateSelectedLessonsBtn');
+            const checkboxes = document.querySelectorAll('#lessonPlanSubjectsList input[type="checkbox"]');
+            const anyChecked = [...checkboxes].some(cb => cb.checked);
+            generateBtn.disabled = !anyChecked;
+        }
+        
+        // Generate lesson plans for selected subjects
+        async function generateSelectedLessonPlans() {
+            const classSelect = document.getElementById('lessonPlanClassSelector');
+            const checkboxes = document.querySelectorAll('#lessonPlanSubjectsList input[type="checkbox"]:checked');
+            
+            if (checkboxes.length === 0) {
+                displayAlert('Veuillez sélectionner au moins une matière.', true);
+                return;
+            }
+            
+            if (!currentWeek) {
+                displayAlert("please_select_week", true);
+                return;
+            }
+            
+            const selectedClass = classSelect.value;
+            const selectedSubjects = [...checkboxes].map(cb => cb.value);
+            
+            console.log(`Génération des plans de leçon pour ${selectedClass}, matières:`, selectedSubjects);
+            
+            const confirmation = confirm(`Générer les plans de leçon pour ${selectedSubjects.length} matière(s) dans la classe ${selectedClass} (semaine ${currentWeek}) ?`);
+            if (!confirmation) return;
+            
+            displayAlert(`Génération de ${selectedSubjects.length} plan(s) de leçon...`, false);
+            setButtonLoading('generateSelectedLessonsBtn', true, 'fas fa-robot');
+            showProgressBar();
+            
+            let successCount = 0;
+            let errorCount = 0;
+            
+            // Get all rows for selected class and subjects
+            const classKey = findHKey('Classe');
+            const matiereKey = findHKey('Matière');
+            
+            const rowsToGenerate = planData.filter(item => 
+                item[classKey] === selectedClass && selectedSubjects.includes(item[matiereKey])
+            );
+            
+            const total = rowsToGenerate.length;
+            console.log(`${total} lignes à traiter pour les plans de leçon`);
+            
+            try {
+                for (let i = 0; i < total; i++) {
+                    const rowData = rowsToGenerate[i];
+                    const progress = Math.round(((i + 1) / total) * 95);
+                    updateProgressBar(progress);
+                    
+                    try {
+                        const response = await fetch('/api/generate-ai-lesson-plan', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ week: currentWeek, rowData: rowData })
+                        });
+                        
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            const contentDisposition = response.headers.get('content-disposition');
+                            let filename = `plan_lecon_${selectedClass}_${i + 1}.docx`;
+                            if (contentDisposition) {
+                                const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(;|$)/i);
+                                if (filenameMatch && filenameMatch[1]) {
+                                    filename = filenameMatch[1];
+                                }
+                            }
+                            
+                            // Save the file
+                            if (typeof saveAs === 'function') {
+                                saveAs(blob, filename);
+                            }
+                            
+                            // Store filename in database for later retrieval
+                            rowData.lessonPlanFilename = filename;
+                            await fetch('/api/save-row', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ week: currentWeek, data: rowData })
+                            });
+                            
+                            successCount++;
+                        } else {
+                            const errorResult = await response.json().catch(() => ({ message: "Erreur inconnue" }));
+                            console.error(`Erreur ligne ${i + 1}:`, errorResult.message);
+                            errorCount++;
+                        }
+                    } catch (error) {
+                        console.error(`Erreur génération ligne ${i + 1}:`, error);
+                        errorCount++;
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+                
+                updateProgressBar(100);
+                
+                if (errorCount === 0) {
+                    displayAlert(`✅ ${successCount} plan(s) de leçon généré(s) avec succès !`, false);
+                } else {
+                    displayAlert(`⚠️ ${successCount} réussis, ${errorCount} échoués`, false);
+                }
+                
+                // Reload data to show new lesson plan buttons
+                await loadPlanForWeek();
+                
+            } catch (error) {
+                console.error("Erreur génération plans de leçon:", error);
+                displayAlert('Erreur lors de la génération des plans de leçon.', true);
+                updateProgressBar(0);
+            } finally {
+                hideProgressBar();
+                setButtonLoading('generateSelectedLessonsBtn', false, 'fas fa-robot');
+            }
+        }
 
         console.log("Script principal terminé.");
