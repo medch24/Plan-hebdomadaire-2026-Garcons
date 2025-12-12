@@ -99,7 +99,7 @@
         async function saveNotes() { const statusEl=document.getElementById('notes-save-status'); const classSel=document.getElementById('notesClassSelector'); const selCls=classSel.value; if(!selCls){displayAlert("select_class",true); return;} if(!currentWeek){displayAlert("please_select_week",true); return;} statusEl.textContent = t('saving'); displayAlert(''); setButtonLoading('saveNotesBtn',true,'fas fa-save'); const notesVal=document.getElementById('notesInput').value; console.log(t('saving_notes_for', { class: selCls, week: currentWeek })); try{ const response=await fetch('/api/save-notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({week:currentWeek,classe:selCls,notes:notesVal})}); const result=await response.json(); if(!response.ok){throw new Error(result.message||`Erreur ${response.status}`);} weeklyClassNotes[selCls]=notesVal; displayAlert('notes_saved_success', false, { class: selCls, week: currentWeek }); statusEl.textContent = t('saved'); setTimeout(()=>{statusEl.textContent='';},3000); } catch(error){ console.error('Err saveNotes:',error); displayAlert('error_saving_notes', true, { error: error.message }); statusEl.textContent=`${t('error_saving_notes',{error:''}).replace(': {error}','')}: ${error.message}`; } finally{setButtonLoading('saveNotesBtn',false,'fas fa-save');} }
         function checkAndDisplayIncompleteTeachers() { console.log("checkIncomplete"); incompleteTeachersInfo={}; const list=document.getElementById('incompleteList'); list.innerHTML=''; if(!planData||planData.length===0){list.innerHTML=`<li>${t('no_data')}</li>`; return;} const teacherKey=findHKey('Enseignant'); const classKey=findHKey('Classe'); const taskKey=findHKey('Travaux de classe'); if(!teacherKey||!classKey||!taskKey){console.warn("Manque cols Ens/Cls/Travaux"); list.innerHTML=`<li>${t('error_config_columns')}</li>`; return;} planData.forEach(item=>{const teacher=item[teacherKey]; const taskVal=item[taskKey]; const clsName=item[classKey]; if(teacher&&clsName&&(taskVal==null||String(taskVal).trim()==='')){if(!incompleteTeachersInfo[teacher]){incompleteTeachersInfo[teacher]=new Set();} incompleteTeachersInfo[teacher].add(clsName);}}); const teachers=Object.keys(incompleteTeachersInfo); if(teachers.length===0){list.innerHTML=`<li>${t('all_complete')}</li>`;} else { teachers.sort().forEach(teacher=>{ const classes=[...incompleteTeachersInfo[teacher]].sort().join(', '); const li=document.createElement('li'); li.innerHTML = `<span class="incomplete-teacher-name">${teacher}</span> (<span class="incomplete-class-list">${classes}</span>)`; list.appendChild(li); }); } }
         function toggleIncompleteList() { const listDiv=document.getElementById('incompleteTeachersDisplay'); const btn=document.getElementById('toggleIncompleteBtn'); const btnTextSpan = btn.querySelector('.btn-text'); if(listDiv.style.display==='none'||listDiv.style.display===''){ listDiv.style.display='block'; btn.querySelector('i').className = 'fas fa-xmark'; if(btnTextSpan) btnTextSpan.textContent = t('hide_incomplete'); } else { listDiv.style.display='none'; btn.querySelector('i').className = 'fas fa-list-check'; if(btnTextSpan) btnTextSpan.textContent = t('display_incomplete'); } }
-        async function fetchPlanData(week) { if (!week || isNaN(parseInt(week, 10))) { console.warn("fetchPlanData sans semaine valide."); displayPlanTable([]); document.getElementById('weekDateRange').textContent = t('please_select_week'); return; } if (!loggedInUser) { console.warn("Tentative chargement non connecté."); displayAlert("login_title", true); return; } console.log(`fetchPlanData S${week} pour ${loggedInUser}`); displayAlert('loading_data_week', false, { week: week }); showProgressBar(); updateProgressBar(10); currentWeek = week; const weekNum=parseInt(week,10); const dateRangeEl=document.getElementById('weekDateRange'); weekStartDate=null; planData=[]; headers=[]; weeklyClassNotes={}; dateRangeEl.textContent=`${t('week_label')} ${week}: ${t('loading')}`; displayPlanTable([]); updateActionButtonsState(false); const dates=specificWeekDateRanges[weekNum]; if(dates?.start&&dates?.end){try{const s=new Date(dates.start+'T00:00:00Z'); const e=new Date(dates.end+'T00:00:00Z'); if(!isNaN(s.getTime())&&!isNaN(e.getTime())){ weekStartDate=s; dateRangeEl.textContent = `${t('week_label')} ${week} : ${isArabicUser() ? 'من' : (currentUserLanguage === 'en' ? 'from' : 'du')} ${formatDateForDisplay(s)} ${isArabicUser() ? 'إلى' : (currentUserLanguage === 'en' ? 'to' : 'à')} ${formatDateForDisplay(e)}`;} else throw new Error();}catch(e){dateRangeEl.textContent=`S ${week} (Err dates)`; weekStartDate=null;}} else {dateRangeEl.textContent=`${t('week_label')} ${week} (${t('no_data')}: dates non définies)`; weekStartDate=null;} updateProgressBar(30); try{const r=await fetch(`/api/plans/${week}`); updateProgressBar(70); if(!r.ok){const d=await r.json().catch(()=>null); throw new Error(d?.message || `Err ${r.status}`);} const fetched=await r.json(); if(fetched&&typeof fetched==='object'){planData=fetched.planData||[]; weeklyClassNotes=fetched.classNotes||{};} else {planData=[]; weeklyClassNotes={};} updateProgressBar(90); if(planData.length>0){headers=Object.keys(planData[0]).filter(h=>h!=='_id'&&h!=='id'); if(loggedInUser==='Imad'){const enseignantKey=findHKey('Enseignant');const originalCount=planData.length;if(enseignantKey){planData=planData.filter(row=>arabicTeachers.includes(row[enseignantKey]));console.log(`[Imad Admin] Data filtered for Arabic teachers. ${planData.length}/${originalCount} rows remain.`)}} displayAlert('data_loaded_week', false, { week: week });} else {headers=[]; displayAlert('no_data_found_week', false, { week: week });} createTableHeader(); populateFilterOptions(); populateNotesClassSelector(); sortAndDisplay(); displayClassNotes(); checkAndDisplayIncompleteTeachers(); updateActionButtonsState(planData.length > 0); updateProgressBar(100); } catch(e){ console.error("Err fetchPlanData:",e); displayAlert('error_loading_week', true, { week: week, error: e.message }); planData=[]; headers=[]; weeklyClassNotes={}; createTableHeader(); populateFilterOptions(); populateNotesClassSelector(); sortAndDisplay(); displayClassNotes(); checkAndDisplayIncompleteTeachers(); updateProgressBar(0); updateActionButtonsState(false); } finally{hideProgressBar();} }
+        async function fetchPlanData(week) { if (!week || isNaN(parseInt(week, 10))) { console.warn("fetchPlanData sans semaine valide."); displayPlanTable([]); document.getElementById('weekDateRange').textContent = t('please_select_week'); return; } if (!loggedInUser) { console.warn("Tentative chargement non connecté."); displayAlert("login_title", true); return; } console.log(`fetchPlanData S${week} pour ${loggedInUser}`); displayAlert('loading_data_week', false, { week: week }); showProgressBar(); updateProgressBar(10); currentWeek = week; const weekNum=parseInt(week,10); const dateRangeEl=document.getElementById('weekDateRange'); weekStartDate=null; planData=[]; headers=[]; weeklyClassNotes={}; dateRangeEl.textContent=`${t('week_label')} ${week}: ${t('loading')}`; displayPlanTable([]); updateActionButtonsState(false); const dates=specificWeekDateRanges[weekNum]; if(dates?.start&&dates?.end){try{const s=new Date(dates.start+'T00:00:00Z'); const e=new Date(dates.end+'T00:00:00Z'); if(!isNaN(s.getTime())&&!isNaN(e.getTime())){ weekStartDate=s; dateRangeEl.textContent = `${t('week_label')} ${week} : ${isArabicUser() ? 'من' : (currentUserLanguage === 'en' ? 'from' : 'du')} ${formatDateForDisplay(s)} ${isArabicUser() ? 'إلى' : (currentUserLanguage === 'en' ? 'to' : 'à')} ${formatDateForDisplay(e)}`;} else throw new Error();}catch(e){dateRangeEl.textContent=`S ${week} (Err dates)`; weekStartDate=null;}} else {dateRangeEl.textContent=`${t('week_label')} ${week} (${t('no_data')}: dates non définies)`; weekStartDate=null;} updateProgressBar(30); try{const r=await fetch(`/api/plans/${week}`); updateProgressBar(70); if(!r.ok){const d=await r.json().catch(()=>null); throw new Error(d?.message || `Err ${r.status}`);} const fetched=await r.json(); if(fetched&&typeof fetched==='object'){planData=fetched.planData||[]; weeklyClassNotes=fetched.classNotes||{};} else {planData=[]; weeklyClassNotes={};} updateProgressBar(90); if(planData.length>0){headers=Object.keys(planData[0]).filter(h=>h!=='_id'&&h!=='id'); if(loggedInUser==='Imad'){const enseignantKey=findHKey('Enseignant');const originalCount=planData.length;if(enseignantKey){planData=planData.filter(row=>arabicTeachers.includes(row[enseignantKey]));console.log(`[Imad Admin] Data filtered for Arabic teachers. ${planData.length}/${originalCount} rows remain.`)}} displayAlert('data_loaded_week', false, { week: week });} else {headers=[]; displayAlert('no_data_found_week', false, { week: week });} createTableHeader(); populateFilterOptions(); populateLessonPlanClasses(); populateNotesClassSelector(); sortAndDisplay(); displayClassNotes(); checkAndDisplayIncompleteTeachers(); updateActionButtonsState(planData.length > 0); updateProgressBar(100); } catch(e){ console.error("Err fetchPlanData:",e); displayAlert('error_loading_week', true, { week: week, error: e.message }); planData=[]; headers=[]; weeklyClassNotes={}; createTableHeader(); populateFilterOptions(); populateLessonPlanClasses(); populateNotesClassSelector(); sortAndDisplay(); displayClassNotes(); checkAndDisplayIncompleteTeachers(); updateProgressBar(0); updateActionButtonsState(false); } finally{hideProgressBar();} }
         
         function createTableHeader() {
             const tHead = document.querySelector('#planTable thead tr');
@@ -362,7 +362,7 @@
         async function saveAllDisplayedRows() { if (!filteredAndSortedData || filteredAndSortedData.length === 0) { displayAlert('no_rows_to_save', true); return; } if (!currentWeek) { displayAlert("please_select_week", true); return; } const totalRows = filteredAndSortedData.length; const confirmation = confirm(t('confirm_save_all', { count: totalRows, week: currentWeek })); if (!confirmation) { displayAlert('save_all_cancelled', false); return; } displayAlert('saving_all_displayed', false, { count: totalRows }); setButtonLoading('saveAllDisplayedBtn', true, 'fas fa-save'); showProgressBar(); updateProgressBar(0); let successCount = 0; let errorCount = 0; const tableBody = document.querySelector('#planTable tbody'); for (let i = 0; i < totalRows; i++) { const rowData = filteredAndSortedData[i]; const rowIndex = i; updateProgressBar(Math.round(((i + 1) / totalRows) * 95)); try { const response = await fetch('/api/save-row', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ week: currentWeek, data: rowData }) }); const result = await response.json(); if (!response.ok) { throw new Error(result.message || `Erreur ${response.status} L${rowIndex + 1}`); } successCount++; const tr = tableBody?.querySelector(`tr[data-row-index="${rowIndex}"]`); if (tr) { tr.classList.remove('modified'); const indicator = tr.querySelector('.save-indicator'); if (indicator) indicator.style.display = 'inline-block'; if (result.updatedData?.updatedAt) { const updK = findHKey('updatedAt'); if (updK) { rowData[updK] = result.updatedData.updatedAt; const updCell = tr.querySelector('.updated-at-column'); if (updCell) updCell.textContent = formatUpdatedAt(result.updatedData.updatedAt); } } } } catch (error) { console.error(`Err L${rowIndex + 1}:`, error); errorCount++; const tr = tableBody?.querySelector(`tr[data-row-index="${rowIndex}"]`); if(tr) { tr.style.backgroundColor = '#f8d7da'; tr.classList.add('modified'); const indicator = tr.querySelector('.save-indicator'); if(indicator) indicator.style.display = 'none'; } } } updateProgressBar(100); hideProgressBar(); setButtonLoading('saveAllDisplayedBtn', false, 'fas fa-save'); if (errorCount === 0) { displayAlert('save_all_success', false, { count: successCount }); } else { displayAlert('save_all_partial', true, { success: successCount, error: errorCount }); } checkAndDisplayIncompleteTeachers(); }
         async function generateWordByClasse() { const dataGen = filteredAndSortedData; if(!dataGen || dataGen.length === 0){ displayAlert("no_data_to_display_filters", true); return; } if(!currentWeek){displayAlert("please_select_week",true); return;} setButtonLoading('generateWordBtn', true, 'fas fa-file-word'); const dataCls = {}; const clsK = findHKey('Classe'); if (!clsK) { displayAlert("error_config_columns", true); setButtonLoading('generateWordBtn', false, 'fas fa-file-word'); return; } dataGen.forEach(i => { if (!i || !i[clsK]) return; const cl = i[clsK]; if (!dataCls[cl]) { dataCls[cl] = []; } dataCls[cl].push(i); }); const clsGen = Object.keys(dataCls); if (clsGen.length === 0) { displayAlert("no_data", true); setButtonLoading('generateWordBtn', false, 'fas fa-file-word'); return; } displayAlert('generating_word', false, { count: clsGen.length }); showProgressBar(); updateProgressBar(0); let ok = 0, err = 0; const total = clsGen.length; for (let i = 0; i < total; i++) { const cl = clsGen[i]; const clData = dataCls[cl]; const clNote = weeklyClassNotes[cl] || ""; updateProgressBar(Math.round(((i + 1) / total) * 100)); try { const payload = { week: currentWeek, classe: cl, data: clData, notes: clNote }; const r = await fetch('/api/generate-word', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (r.ok) { const blob = await r.blob(); const cd = r.headers.get('content-disposition'); let filename = `plan_s${currentWeek}_${cl.replace(/[^a-z0-9]/gi, '_')}.docx`; if (cd) { const m = cd.match(/filename="?(.+?)"?(;|$)/i); if (m && m[1]) filename = m[1]; } if (typeof saveAs === 'function') { try { saveAs(blob, filename); ok++; } catch (e) { err++; console.error(`SaveAs ${cl}:`, e); displayAlert(t('error', {error: `Err sauvegarde ${cl}: ${e.message}`}), true); } } else { err++; console.error("saveAs non défini!"); displayAlert(t('error', {error: "saveAs non trouvé."}), true); break; } } else { const d = await r.json().catch(() => ({ message: `Erreur ${r.status}` })); console.error(`Err Word ${cl}:`, r.status, d); if (d.message && d.message.includes('Dates non trouvées côté serveur')) { displayAlert('no_word_dates', true, {week: currentWeek}); err++; } else { displayAlert('error_generating_word_for', true, {classe: cl, error: (d.message || 'Inconnue')}); err++; } } } catch (e) { err++; console.error(`Err Fetch Word ${cl}:`, e); displayAlert('error', true, { error: `Erreur réseau Word ${cl}: ${e.message}` }); } } hideProgressBar(); setButtonLoading('generateWordBtn', false, 'fas fa-file-word'); if (ok > 0 && err === 0) { displayAlert('generating_word_success', false, { count: ok }); } else if (ok > 0 && err > 0) { displayAlert('generating_word_partial', true, { ok: ok, err: err }); } else if (ok === 0 && err > 0) { if (err > 1) { displayAlert('generating_word_failed', true, {err: err}); } } else if (ok === 0 && err === 0) { displayAlert("no_data", true); } }
         async function generateExcelWorkbook() { if (!currentWeek) { displayAlert("please_select_week", true); return; } setButtonLoading('generateExcelBtn',true,'fas fa-file-excel'); displayAlert('generating_excel', false, { week: currentWeek }); showProgressBar(); updateProgressBar(10); let err=0; try{ const payload = { week: currentWeek }; const r = await fetch('/api/generate-excel-workbook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); updateProgressBar(70); if(r.ok){const blob=await r.blob(); const cd=r.headers.get('content-disposition'); let filename=`plan_s${currentWeek}_complet.xlsx`; if(cd){const m=cd.match(/filename="?(.+?)"?(;|$)/i); if(m&&m[1]) filename=m[1];} if(typeof saveAs==='function'){try{saveAs(blob,filename); updateProgressBar(100); displayAlert('generating_excel_success', false, { filename: filename });} catch(e){err++; console.error(`SaveAs Excel:`,e); displayAlert(t('error', { error: `Err sauvegarde Excel: ${e.message}` }), true); updateProgressBar(0);}} else {err++; console.error("saveAs non défini!"); displayAlert(t('error', { error: "saveAs non trouvé." }), true); updateProgressBar(0);}} else { const d=await r.json().catch(()=>({message:`Err ${r.status}`})); console.error(`Err Excel Wb:`,r.status,d); displayAlert('error_generating_excel', true, { error: (d.message || 'Inconnue') }); updateProgressBar(0); err++;} } catch(e){err++; console.error(`Err Fetch Excel Wb:`,e); displayAlert('error', { error: `Err réseau Excel: ${e.message}` }, true); updateProgressBar(0);} finally{hideProgressBar(); setButtonLoading('generateExcelBtn',false,'fas fa-file-excel');} }
-        async function loadPlanForWeek() { const sel = document.getElementById('weekSelector'); if (sel) { const wk = sel.value; if (wk) { await fetchPlanData(wk); } else { currentWeek = null; planData = []; headers = []; weeklyClassNotes = {}; filteredAndSortedData = []; createTableHeader(); displayPlanTable([]); document.getElementById('weekDateRange').textContent = ""; updateActionButtonsState(false); populateFilterOptions(); populateNotesClassSelector(); checkAndDisplayIncompleteTeachers(); displayAlert(''); } } else { console.error("#weekSelector absent"); displayAlert("error_structure", true); } }
+        async function loadPlanForWeek() { const sel = document.getElementById('weekSelector'); if (sel) { const wk = sel.value; if (wk) { await fetchPlanData(wk); } else { currentWeek = null; planData = []; headers = []; weeklyClassNotes = {}; filteredAndSortedData = []; createTableHeader(); displayPlanTable([]); document.getElementById('weekDateRange').textContent = ""; updateActionButtonsState(false); populateFilterOptions(); populateLessonPlanClasses(); populateNotesClassSelector(); checkAndDisplayIncompleteTeachers(); displayAlert(''); } } else { console.error("#weekSelector absent"); displayAlert("error_structure", true); } }
         function applyLanguageSettings() { console.log(`Applying language: ${currentUserLanguage}`); document.documentElement.lang = currentUserLanguage; document.body.dir = (currentUserLanguage === 'ar') ? 'rtl' : 'ltr'; updateStaticUIElements(); if (currentWeek) { updateDynamicUIElements(); } else { document.getElementById('weekDateRange').textContent = ""; const initialTableMsg = document.getElementById('initial-table-message'); if (initialTableMsg) { initialTableMsg.textContent = t('select_week_to_display'); } else { const tBody = document.querySelector('#planTable tbody'); const colspanVal = document.querySelector('#planTable thead tr')?.querySelectorAll('th').length || 10; if (tBody) { tBody.innerHTML = `<tr id="initial-table-row"><td colspan="${colspanVal}" class="table-message">${t('select_week_to_display')}</td></tr>`; } } } if (document.getElementById('login-form').style.display !== 'none') { updateLoginUIElements(); } }
         function updateStaticUIElements() { console.log("Updating static UI for lang:", currentUserLanguage); if (document.getElementById('main-content').style.display !== 'none') { document.title = t('main_page_title'); } else { document.title = t('login_title'); } updateLoginUIElements(); const mainTitle = document.getElementById('main-title'); if(mainTitle) mainTitle.textContent = t('main_page_title'); const logoutBtnText = document.querySelector('#logout-button .btn-text'); if(logoutBtnText) logoutBtnText.textContent = t('logout_button'); const toggleBtn = document.getElementById('toggleIncompleteBtn'); if (toggleBtn) { const btnTextSpan = toggleBtn.querySelector('.btn-text'); const listDiv=document.getElementById('incompleteTeachersDisplay'); if (btnTextSpan) { btnTextSpan.textContent = (listDiv && listDiv.style.display !== 'none') ? t('hide_incomplete') : t('display_incomplete'); } } const incompleteH4 = document.querySelector('#incompleteTeachersDisplay h4'); if(incompleteH4) incompleteH4.textContent = t('incomplete_teachers_title'); const incompleteLi = document.querySelector('#incompleteList li'); if(incompleteLi && incompleteLi.textContent.match(/(Chargement|Loading|جاري التحميل)/)) incompleteLi.textContent = t('loading'); const weekLabel = document.querySelector('label[for="weekSelector"]'); if(weekLabel) weekLabel.innerHTML = `<i class="fas fa-calendar-week"></i> ${t('week_label')}`; const adminTitle = document.getElementById('admin-title'); if(adminTitle) adminTitle.textContent = t('admin_actions_title'); const adminExcelLabel = document.getElementById('admin-excel-label'); if(adminExcelLabel) adminExcelLabel.innerHTML = `<i class="fas fa-file-excel"></i> ${t('admin_excel_label')}`; const saveUploadedDataBtnText = document.querySelector('#saveUploadedDataBtn .btn-text'); if(saveUploadedDataBtnText) saveUploadedDataBtnText.textContent = t('admin_save_button'); const genWordBtnText = document.querySelector('#generateWordBtn .btn-text'); if(genWordBtnText) genWordBtnText.textContent = t('generate_word_button'); const genExcelBtnText = document.querySelector('#generateExcelBtn .btn-text'); if(genExcelBtnText) genExcelBtnText.textContent = t('generate_excel_button'); const saveAllBtnText = document.querySelector('#saveAllDisplayedBtn .btn-text'); if(saveAllBtnText) saveAllBtnText.textContent = t('save_all_button'); const weeklyLessonsBtnText = document.querySelector('#generateWeeklyLessonsBtn .btn-text'); if(weeklyLessonsBtnText) weeklyLessonsBtnText.textContent = t('generate_weekly_lessons_button'); const filterEnsLabel = document.getElementById('filter-enseignant-label'); if(filterEnsLabel) filterEnsLabel.innerHTML = `<i class="fas fa-user-tie"></i> ${t('filter_teacher_label')}`; const filterClsLabel = document.getElementById('filter-classe-label'); if(filterClsLabel) filterClsLabel.innerHTML = `<i class="fas fa-chalkboard-user"></i> ${t('filter_class_label')}`; const filterMatLabel = document.getElementById('filter-matiere-label'); if(filterMatLabel) filterMatLabel.innerHTML = `<i class="fas fa-book"></i> ${t('filter_material_label')}`; const filterPerLabel = document.getElementById('filter-periode-label'); if(filterPerLabel) filterPerLabel.innerHTML = `<i class="fas fa-clock"></i> ${t('filter_period_label')}`; const filterJourLabel = document.getElementById('filter-jour-label'); if(filterJourLabel) filterJourLabel.innerHTML = `<i class="fas fa-calendar-day"></i> ${t('filter_day_label')}`; const notesClsLabel = document.getElementById('notes-class-label'); if(notesClsLabel) notesClsLabel.innerHTML = `<i class="fas fa-sticky-note"></i> ${t('notes_for_class')}`; const notesInput = document.getElementById('notesInput'); if(notesInput && notesInput.placeholder.match(/(Sélectionnez|اختر|Select)/)){ notesInput.placeholder = t('select_class_placeholder'); } const saveNotesBtnText = document.querySelector('#saveNotesBtn .btn-text'); if(saveNotesBtnText) saveNotesBtnText.textContent = t('save_notes_button'); updateFilterOptionDefaultTexts(); const adminReportLabel = document.getElementById('admin-report-class-label'); if (adminReportLabel) adminReportLabel.innerHTML = `<i class="fas fa-school"></i> ${t('admin_report_class_label')}`; const adminReportBtnText = document.querySelector('#generateFullReportBtn .btn-text'); if (adminReportBtnText) adminReportBtnText.textContent = t('generate_full_report_button'); }
         function updateLoginUIElements() { const loginH1 = document.querySelector('#login-form h1'); if(loginH1) loginH1.textContent = t('login_title'); const userLabel = document.querySelector('label[for="username"]'); if(userLabel) userLabel.textContent = t('login_username_label'); const passLabel = document.querySelector('label[for="password"]'); if(passLabel) passLabel.textContent = t('login_password_label'); const rememberLabel = document.getElementById('remember-me-label'); if(rememberLabel) rememberLabel.textContent = t('remember_me'); const loginBtnText = document.querySelector('#login-button .btn-text'); if(loginBtnText) loginBtnText.textContent = t('login_button_text'); if (document.getElementById('login-form').style.display !== 'none') { document.title = t('login_title'); } }
@@ -387,6 +387,7 @@
             if (loggedInUser === 'Mohamed') { 
                 document.getElementById('admin-actions').style.display = 'flex';
                 populateAdminReportClassSelector();
+                populateLessonPlanClasses();
                 document.getElementById('lesson-plan-generator').style.display = 'flex';
             } else {
                 document.getElementById('admin-actions').style.display = 'none';
@@ -402,7 +403,7 @@
             
             createTableHeader();
             displayPlanTable([]);
-            populateFilterOptions();
+            populateFilterOptions(); populateLessonPlanClasses();
             populateNotesClassSelector();
             checkAndDisplayIncompleteTeachers();
             updateActionButtonsState(false);
@@ -605,7 +606,216 @@
         
         // ==================== GÉNÉRATION PLANS DE LEÇON (COORDINATEUR) ====================
         
-        // Fonction principale: Générer tous les plans de leçon
+        // Fonction pour peupler les checkboxes des classes
+        function populateLessonPlanClasses() {
+            const container = document.getElementById('lessonPlanClassesList');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            if (!planData || planData.length === 0) {
+                container.innerHTML = '<p style="color: #999;">Aucune donnée disponible</p>';
+                updateGenerateButtonState();
+                return;
+            }
+            
+            const classKey = findHKey('Classe');
+            if (!classKey) {
+                container.innerHTML = '<p style="color: #999;">Erreur: colonne Classe non trouvée</p>';
+                updateGenerateButtonState();
+                return;
+            }
+            
+            const uniqueClasses = [...new Set(planData.map(item => item[classKey]).filter(Boolean))];
+            uniqueClasses.sort(compareClasses);
+            
+            if (uniqueClasses.length === 0) {
+                container.innerHTML = '<p style="color: #999;">Aucune classe trouvée</p>';
+                updateGenerateButtonState();
+                return;
+            }
+            
+            uniqueClasses.forEach(cls => {
+                const wrapper = document.createElement('div');
+                wrapper.style.marginBottom = '8px';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `class_${cls}`;
+                checkbox.value = cls;
+                checkbox.classList.add('class-checkbox');
+                checkbox.addEventListener('change', () => {
+                    updateLessonPlanSubjects();
+                    updateGenerateButtonState();
+                });
+                
+                const label = document.createElement('label');
+                label.htmlFor = `class_${cls}`;
+                label.style.marginLeft = '5px';
+                label.style.cursor = 'pointer';
+                
+                const arTranslation = classTranslations[cls];
+                label.textContent = arTranslation ? `${arTranslation} (${cls})` : cls;
+                
+                wrapper.appendChild(checkbox);
+                wrapper.appendChild(label);
+                container.appendChild(wrapper);
+            });
+            
+            updateLessonPlanSubjects();
+            updateGenerateButtonState();
+        }
+        
+        // Fonction pour peupler les checkboxes des matières (basé sur les classes sélectionnées)
+        function updateLessonPlanSubjects() {
+            const container = document.getElementById('lessonPlanSubjectsList');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            // Récupérer les classes sélectionnées
+            const selectedClasses = Array.from(document.querySelectorAll('.class-checkbox:checked'))
+                .map(cb => cb.value);
+            
+            if (selectedClasses.length === 0) {
+                container.innerHTML = '<p style="color: #999;">Sélectionnez d\'abord une ou plusieurs classes</p>';
+                updateGenerateButtonState();
+                return;
+            }
+            
+            if (!planData || planData.length === 0) {
+                container.innerHTML = '<p style="color: #999;">Aucune donnée disponible</p>';
+                updateGenerateButtonState();
+                return;
+            }
+            
+            const classKey = findHKey('Classe');
+            const matiereKey = findHKey('Matière');
+            
+            if (!classKey || !matiereKey) {
+                container.innerHTML = '<p style="color: #999;">Erreur de configuration</p>';
+                updateGenerateButtonState();
+                return;
+            }
+            
+            // Mots-clés pour exclure les matières arabes
+            const arabicKeywords = [
+                'عربي', 'العربية', 'اللغة العربية', 'arabe',
+                'قرآن', 'القرآن', 'coran',
+                'تجويد', 'التجويد', 'tajwid',
+                'حديث', 'الحديث', 'hadith',
+                'تربية', 'التربية', 'islamique',
+                'توحيد', 'التوحيد', 'tawhid',
+                'فقه', 'الفقه', 'fiqh',
+                'سيرة', 'السيرة', 'sirah'
+            ];
+            
+            // Récupérer toutes les matières des classes sélectionnées
+            const subjectsFromSelectedClasses = planData
+                .filter(item => selectedClasses.includes(item[classKey]) && item[matiereKey])
+                .map(item => item[matiereKey]);
+            
+            // Filtrer pour exclure les matières arabes
+            const uniqueSubjects = [...new Set(subjectsFromSelectedClasses)]
+                .filter(subject => {
+                    return !arabicKeywords.some(keyword => 
+                        subject.toLowerCase().includes(keyword.toLowerCase())
+                    );
+                })
+                .sort();
+            
+            if (uniqueSubjects.length === 0) {
+                container.innerHTML = '<p style="color: #999;">Aucune matière non-arabe trouvée pour ces classes</p>';
+                updateGenerateButtonState();
+                return;
+            }
+            
+            uniqueSubjects.forEach(subject => {
+                const wrapper = document.createElement('div');
+                wrapper.style.marginBottom = '8px';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `subject_${subject}`;
+                checkbox.value = subject;
+                checkbox.classList.add('subject-checkbox');
+                checkbox.addEventListener('change', updateGenerateButtonState);
+                
+                const label = document.createElement('label');
+                label.htmlFor = `subject_${subject}`;
+                label.style.marginLeft = '5px';
+                label.style.cursor = 'pointer';
+                label.textContent = subject;
+                
+                wrapper.appendChild(checkbox);
+                wrapper.appendChild(label);
+                container.appendChild(wrapper);
+            });
+            
+            updateGenerateButtonState();
+        }
+        
+        // Fonction pour activer/désactiver le bouton de génération
+        function updateGenerateButtonState() {
+            const btn = document.getElementById('generateAllLessonPlansBtn');
+            const infoSpan = document.getElementById('lessonPlanSelectionInfo');
+            
+            if (!btn || !infoSpan) return;
+            
+            const selectedClasses = Array.from(document.querySelectorAll('.class-checkbox:checked'));
+            const selectedSubjects = Array.from(document.querySelectorAll('.subject-checkbox:checked'));
+            
+            const classCount = selectedClasses.length;
+            const subjectCount = selectedSubjects.length;
+            
+            if (classCount > 0 && subjectCount > 0) {
+                btn.disabled = false;
+                infoSpan.textContent = `${classCount} classe(s) et ${subjectCount} matière(s) sélectionnées`;
+                infoSpan.style.color = '#28a745';
+            } else {
+                btn.disabled = true;
+                if (classCount === 0) {
+                    infoSpan.textContent = 'Sélectionnez au moins une classe';
+                } else {
+                    infoSpan.textContent = 'Sélectionnez au moins une matière';
+                }
+                infoSpan.style.color = '#999';
+            }
+        }
+        
+        // Fonctions pour sélectionner/déselectionner toutes les classes
+        function selectAllClasses() {
+            document.querySelectorAll('.class-checkbox').forEach(cb => {
+                cb.checked = true;
+            });
+            updateLessonPlanSubjects();
+            updateGenerateButtonState();
+        }
+        
+        function deselectAllClasses() {
+            document.querySelectorAll('.class-checkbox').forEach(cb => {
+                cb.checked = false;
+            });
+            updateLessonPlanSubjects();
+            updateGenerateButtonState();
+        }
+        
+        // Fonctions pour sélectionner/déselectionner toutes les matières
+        function selectAllSubjects() {
+            document.querySelectorAll('.subject-checkbox').forEach(cb => {
+                cb.checked = true;
+            });
+            updateGenerateButtonState();
+        }
+        
+        function deselectAllSubjects() {
+            document.querySelectorAll('.subject-checkbox').forEach(cb => {
+                cb.checked = false;
+            });
+            updateGenerateButtonState();
+        }
+        
+        // Fonction principale: Générer tous les plans de leçon sélectionnés
         async function startGenerateAllLessonPlans() {
             if (!currentWeek) {
                 displayAlert("Veuillez d'abord sélectionner une semaine.", true);
@@ -617,107 +827,45 @@
                 return;
             }
             
-            // Étape 1: Demander la classe
-            const classKey = findHKey('Classe');
-            const uniqueClasses = [...new Set(planData.map(item => item[classKey]).filter(Boolean))];
-            uniqueClasses.sort(compareClasses);
+            // Récupérer les classes et matières sélectionnées
+            const selectedClasses = Array.from(document.querySelectorAll('.class-checkbox:checked'))
+                .map(cb => cb.value);
+            const selectedSubjects = Array.from(document.querySelectorAll('.subject-checkbox:checked'))
+                .map(cb => cb.value);
             
-            if (uniqueClasses.length === 0) {
-                displayAlert("Aucune classe trouvée dans les données.", true);
+            if (selectedClasses.length === 0 || selectedSubjects.length === 0) {
+                displayAlert("Veuillez sélectionner au moins une classe et une matière.", true);
                 return;
             }
             
-            let classOptions = 'Choisissez une classe :\n\n';
-            uniqueClasses.forEach((cls, index) => {
-                const arTranslation = classTranslations[cls];
-                classOptions += `${index + 1}. ${arTranslation ? arTranslation + ' (' + cls + ')' : cls}\n`;
-            });
-            classOptions += '\nEntrez le numéro de la classe :';
-            
-            const classChoice = prompt(classOptions);
-            if (!classChoice) return; // Annulé
-            
-            const classIndex = parseInt(classChoice) - 1;
-            if (isNaN(classIndex) || classIndex < 0 || classIndex >= uniqueClasses.length) {
-                displayAlert("Choix invalide.", true);
-                return;
-            }
-            
-            const selectedClass = uniqueClasses[classIndex];
-            console.log('Classe sélectionnée:', selectedClass);
-            
-            // Étape 2: Demander la matière (exclure les matières arabes)
-            const matiereKey = findHKey('Matière');
-            const arabicKeywords = [
-                'عربي', 'العربية', 'اللغة العربية', 'arabe',
-                'قرآن', 'القرآن', 'coran',
-                'تجويد', 'التجويد', 'tajwid',
-                'حديث', 'الحديث', 'hadith',
-                'تربية', 'التربية', 'islamique',
-                'توحيد', 'التوحيد', 'tawhid',
-                'فقه', 'الفقه', 'fiqh'
-            ];
-            
-            const classSubjects = planData
-                .filter(item => item[classKey] === selectedClass && item[matiereKey])
-                .map(item => item[matiereKey]);
-            
-            const uniqueSubjects = [...new Set(classSubjects)].filter(subject => {
-                return !arabicKeywords.some(keyword => 
-                    subject.toLowerCase().includes(keyword.toLowerCase())
-                );
-            }).sort();
-            
-            if (uniqueSubjects.length === 0) {
-                displayAlert("Aucune matière non-arabe trouvée pour cette classe.", true);
-                return;
-            }
-            
-            let subjectOptions = `Classe: ${selectedClass}\nChoisissez une matière :\n\n`;
-            uniqueSubjects.forEach((subject, index) => {
-                subjectOptions += `${index + 1}. ${subject}\n`;
-            });
-            subjectOptions += '\nEntrez le numéro de la matière :';
-            
-            const subjectChoice = prompt(subjectOptions);
-            if (!subjectChoice) return; // Annulé
-            
-            const subjectIndex = parseInt(subjectChoice) - 1;
-            if (isNaN(subjectIndex) || subjectIndex < 0 || subjectIndex >= uniqueSubjects.length) {
-                displayAlert("Choix invalide.", true);
-                return;
-            }
-            
-            const selectedSubject = uniqueSubjects[subjectIndex];
-            console.log('Matière sélectionnée:', selectedSubject);
-            
-            // Confirmation finale
+            // Confirmation
             const confirmation = confirm(
                 `Générer les plans de leçon pour :\n\n` +
-                `Classe: ${selectedClass}\n` +
-                `Matière: ${selectedSubject}\n` +
+                `Classes: ${selectedClasses.join(', ')}\n` +
+                `Matières: ${selectedSubjects.join(', ')}\n` +
                 `Semaine: ${currentWeek}\n\n` +
+                `Cela générera des plans pour toutes les combinaisons classe/matière.\n\n` +
                 `Continuer ?`
             );
             
             if (!confirmation) return;
             
-            // Étape 3: Génération
-            await generateLessonPlansForClassAndSubject(selectedClass, selectedSubject);
+            // Génération
+            await generateMultipleLessonPlans(selectedClasses, selectedSubjects);
         }
         
-        // Générer les plans de leçon pour une classe et une matière
-        async function generateLessonPlansForClassAndSubject(selectedClass, selectedSubject) {
+        // Générer les plans pour toutes les combinaisons classe/matière sélectionnées
+        async function generateMultipleLessonPlans(selectedClasses, selectedSubjects) {
             const classKey = findHKey('Classe');
             const matiereKey = findHKey('Matière');
             
             // Filtrer les lignes correspondantes
             const rowsToGenerate = planData.filter(item => 
-                item[classKey] === selectedClass && item[matiereKey] === selectedSubject
+                selectedClasses.includes(item[classKey]) && selectedSubjects.includes(item[matiereKey])
             );
             
             if (rowsToGenerate.length === 0) {
-                displayAlert("Aucune ligne trouvée pour cette combinaison classe/matière.", true);
+                displayAlert("Aucune ligne trouvée pour ces combinaisons classe/matière.", true);
                 return;
             }
             
@@ -747,7 +895,7 @@
                         if (response.ok) {
                             const blob = await response.blob();
                             const contentDisposition = response.headers.get('content-disposition');
-                            let filename = `plan_lecon_${selectedClass}_${selectedSubject}_${i + 1}.docx`;
+                            let filename = `plan_lecon_${rowData[classKey]}_${rowData[matiereKey]}_${i + 1}.docx`;
                             if (contentDisposition) {
                                 const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(;|$)/i);
                                 if (filenameMatch && filenameMatch[1]) {
