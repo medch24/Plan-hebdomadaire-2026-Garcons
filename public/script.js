@@ -235,14 +235,34 @@
                 indicatorSpan.style.display = rowObj && updK && rowObj[updK] ? 'inline-block' : 'none';
                 actTd.appendChild(indicatorSpan);
                 
-                // Ajouter bouton pour télécharger le plan de leçon (toujours disponible)
-                const lessonBtn = document.createElement('button');
-                lessonBtn.innerHTML = '<i class="fas fa-file-download"></i>';
-                lessonBtn.title = 'Télécharger Plan de Leçon';
-                lessonBtn.classList.add('lesson-plan-button');
-                lessonBtn.style.marginLeft = '5px';
-                lessonBtn.onclick = () => downloadLessonPlan(rowObj);
-                actTd.appendChild(lessonBtn);
+                // Ajouter bouton pour télécharger le plan de leçon
+                // SEULEMENT si un plan existe ET que ce n'est PAS une matière arabe
+                const matiereKey = findHKey('Matière');
+                const matiere = rowObj ? (rowObj[matiereKey] || '') : '';
+                const arabicKeywords = [
+                    'عربي', 'العربية', 'اللغة العربية',
+                    'قرآن', 'القرآن', 'coran',
+                    'تجويد', 'التجويد', 'tajwid',
+                    'حديث', 'الحديث', 'hadith',
+                    'تربية', 'التربية', 'islamique',
+                    'توحيد', 'التوحيد', 'tawhid',
+                    'فقه', 'الفقه', 'fiqh',
+                    'arabe'
+                ];
+                const isArabicSubject = matiere && arabicKeywords.some(keyword => 
+                    matiere.toLowerCase().includes(keyword.toLowerCase())
+                );
+                
+                // Afficher le bouton seulement si un plan de leçon existe ET ce n'est pas une matière arabe
+                if (rowObj && rowObj.lessonPlanId && !isArabicSubject) {
+                    const lessonBtn = document.createElement('button');
+                    lessonBtn.innerHTML = '<i class="fas fa-file-download"></i>';
+                    lessonBtn.title = 'Télécharger Plan de Leçon';
+                    lessonBtn.classList.add('lesson-plan-button');
+                    lessonBtn.style.marginLeft = '5px';
+                    lessonBtn.onclick = () => downloadLessonPlan(rowObj);
+                    actTd.appendChild(lessonBtn);
+                }
                 tr.appendChild(actTd);
                 if (updK && tHead && tHead.querySelector('.updated-at-column')) {
                     const updTd = document.createElement('td');
@@ -547,19 +567,17 @@
         
         // Download lesson plan for a specific row
         async function downloadLessonPlan(rowData) {
-            if (!rowData || !currentWeek) {
-                displayAlert('Données manquantes pour télécharger le plan de leçon.', true);
+            if (!rowData || !rowData.lessonPlanId) {
+                displayAlert('Aucun plan de leçon disponible pour cette ligne.', true);
                 return;
             }
             
-            console.log("Téléchargement du plan de leçon pour:", rowData);
+            console.log("Téléchargement du plan de leçon:", rowData.lessonPlanId);
+            displayAlert('Téléchargement du plan de leçon...', false);
             
             try {
-                const response = await fetch('/api/generate-ai-lesson-plan', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ week: currentWeek, rowData: rowData })
-                });
+                // Télécharger depuis MongoDB
+                const response = await fetch(`/api/download-lesson-plan/${rowData.lessonPlanId}`);
                 
                 if (response.ok) {
                     const blob = await response.blob();
@@ -582,7 +600,7 @@
                 }
             } catch (error) {
                 console.error('Erreur téléchargement plan de leçon:', error);
-                displayAlert('Erreur lors du téléchargement du plan de leçon.', true);
+                displayAlert('Erreur lors du téléchargement du plan de leçon: ' + error.message, true);
             }
         }
         
@@ -633,7 +651,15 @@
             // Get all unique subjects for the selected class, excluding Arabic subjects
             const classKey = findHKey('Classe');
             const matiereKey = findHKey('Matière');
-            const arabicSubjects = ['Arabe', 'القرآن', 'Coran', 'التجويد', 'Tajwid', 'الحديث', 'Hadith'];
+            const arabicSubjects = [
+                'Arabe', 'عربي', 'العربية', 'اللغة العربية',
+                'القرآن', 'قرآن', 'Coran', 
+                'التجويد', 'Tajwid', 'تجويد',
+                'الحديث', 'Hadith', 'حديث',
+                'تربية إسلامية', 'التربية الإسلامية', 'Islamique',
+                'التوحيد', 'توحيد', 'Tawhid',
+                'الفقه', 'فقه', 'Fiqh'
+            ];
             
             const subjects = new Set();
             planData.forEach(item => {
@@ -754,20 +780,39 @@
                                 }
                             }
                             
-                            // Save the file
-                            if (typeof saveAs === 'function') {
-                                saveAs(blob, filename);
-                            }
+                            // Convert blob to base64 for saving to MongoDB
+                            const fileBuffer = await blob.arrayBuffer();
+                            const base64Buffer = btoa(String.fromCharCode(...new Uint8Array(fileBuffer)));
                             
-                            // Store filename in database for later retrieval
-                            rowData.lessonPlanFilename = filename;
-                            await fetch('/api/save-row', {
+                            // Save to MongoDB instead of downloading
+                            const saveResponse = await fetch('/api/save-lesson-plan', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ week: currentWeek, data: rowData })
+                                body: JSON.stringify({ 
+                                    week: currentWeek, 
+                                    rowData: rowData,
+                                    fileBuffer: base64Buffer,
+                                    filename: filename
+                                })
                             });
                             
-                            successCount++;
+                            if (saveResponse.ok) {
+                                const saveResult = await saveResponse.json();
+                                // Store lesson plan ID in row data for download button
+                                rowData.lessonPlanId = saveResult.lessonPlanId;
+                                
+                                // Update row in plans collection
+                                await fetch('/api/save-row', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ week: currentWeek, data: rowData })
+                                });
+                                
+                                successCount++;
+                            } else {
+                                console.error('Erreur sauvegarde MongoDB:', await saveResponse.text());
+                                errorCount++;
+                            }
                         } else {
                             const errorResult = await response.json().catch(() => ({ message: "Erreur inconnue" }));
                             console.error(`Erreur ligne ${i + 1}:`, errorResult.message);

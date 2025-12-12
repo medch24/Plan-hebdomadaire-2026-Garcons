@@ -773,6 +773,105 @@ ${jsonStructure}`;
   }
 });
 
+// Sauvegarder un plan de leçon généré dans MongoDB
+app.post('/api/save-lesson-plan', async (req, res) => {
+  try {
+    console.log('💾 [Save Lesson Plan] Sauvegarde d\'un plan de leçon');
+    
+    const { week, rowData, fileBuffer, filename } = req.body;
+    
+    if (!week || !rowData || !fileBuffer || !filename) {
+      return res.status(400).json({ message: 'Données manquantes pour la sauvegarde.' });
+    }
+    
+    const db = await connectToDatabase();
+    
+    // Créer ou mettre à jour le document du plan de leçon
+    const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
+    const classe = rowData[findKey(rowData, 'Classe')] || '';
+    const matiere = rowData[findKey(rowData, 'Matière')] || '';
+    const periode = rowData[findKey(rowData, 'Période')] || '';
+    const jour = rowData[findKey(rowData, 'Jour')] || '';
+    
+    const lessonPlanId = `${week}_${enseignant}_${classe}_${matiere}_${periode}_${jour}`.replace(/\s+/g, '_');
+    
+    await db.collection('lessonPlans').updateOne(
+      { _id: lessonPlanId },
+      {
+        $set: {
+          week: Number(week),
+          enseignant,
+          classe,
+          matiere,
+          periode,
+          jour,
+          filename,
+          fileBuffer: Buffer.from(fileBuffer, 'base64'),
+          createdAt: new Date(),
+          rowData
+        }
+      },
+      { upsert: true }
+    );
+    
+    console.log(`✅ [Save Lesson Plan] Plan sauvegardé: ${lessonPlanId}`);
+    res.status(200).json({ success: true, message: 'Plan de leçon sauvegardé.', lessonPlanId });
+    
+  } catch (error) {
+    console.error('❌ Erreur sauvegarde plan de leçon:', error);
+    res.status(500).json({ message: 'Erreur lors de la sauvegarde du plan de leçon.' });
+  }
+});
+
+// Télécharger un plan de leçon depuis MongoDB
+app.get('/api/download-lesson-plan/:lessonPlanId', async (req, res) => {
+  try {
+    const { lessonPlanId } = req.params;
+    console.log(`📥 [Download Lesson Plan] Téléchargement: ${lessonPlanId}`);
+    
+    const db = await connectToDatabase();
+    const lessonPlan = await db.collection('lessonPlans').findOne({ _id: lessonPlanId });
+    
+    if (!lessonPlan) {
+      return res.status(404).json({ message: 'Plan de leçon introuvable.' });
+    }
+    
+    res.setHeader('Content-Disposition', `attachment; filename="${lessonPlan.filename}"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.send(lessonPlan.fileBuffer.buffer);
+    
+    console.log(`✅ [Download Lesson Plan] Envoyé: ${lessonPlan.filename}`);
+    
+  } catch (error) {
+    console.error('❌ Erreur téléchargement plan de leçon:', error);
+    res.status(500).json({ message: 'Erreur lors du téléchargement du plan de leçon.' });
+  }
+});
+
+// Obtenir la liste des plans de leçon pour une semaine spécifique
+app.get('/api/lesson-plans/:week', async (req, res) => {
+  try {
+    const week = parseInt(req.params.week, 10);
+    if (isNaN(week)) {
+      return res.status(400).json({ message: 'Numéro de semaine invalide.' });
+    }
+    
+    console.log(`📋 [Lesson Plans List] Récupération pour semaine ${week}`);
+    
+    const db = await connectToDatabase();
+    const lessonPlans = await db.collection('lessonPlans')
+      .find({ week }, { projection: { fileBuffer: 0 } }) // Exclure le buffer pour économiser la bande passante
+      .toArray();
+    
+    console.log(`✅ [Lesson Plans List] ${lessonPlans.length} plan(s) trouvé(s)`);
+    res.status(200).json(lessonPlans);
+    
+  } catch (error) {
+    console.error('❌ Erreur récupération liste plans de leçon:', error);
+    res.status(500).json({ message: 'Erreur lors de la récupération des plans de leçon.' });
+  }
+});
+
 // --------------------- Système de Notifications Push ---------------------
 
 // Stocker les abonnements push (en production, utiliser une vraie DB)
