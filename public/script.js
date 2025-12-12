@@ -403,7 +403,7 @@
                 const userActionsContainer = document.querySelector('.user-actions-container');
 //                 if (userActionsContainer && !document.getElementById('notification-toggle-btn')) {
 //                     window.NotificationManager.createToggleButton(loggedInUser, userActionsContainer);
-                }
+//                 }
             }
         }
         
