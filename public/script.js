@@ -425,12 +425,21 @@
             setButtonLoading('login-button', true, 'fas fa-sign-in-alt');
             
             try {
+                console.log("Tentative de connexion pour:", username);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                
                 const response = await fetch('/api/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({ username, password }),
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
+                
                 const result = await response.json();
+                console.log("Réponse serveur:", response.status, result);
                 
                 if (response.ok && result.success) {
                     localStorage.setItem('loggedInUser', result.username);
@@ -442,7 +451,14 @@
                 }
             } catch (error) {
                 console.error("Erreur connexion fetch:", error);
-                errorDiv.textContent = "Erreur communication serveur.";
+                
+                if (error.name === 'AbortError') {
+                    errorDiv.textContent = "Délai d'attente dépassé. Le serveur ne répond pas. Vérifiez votre connexion Internet ou contactez l'administrateur.";
+                } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                    errorDiv.textContent = "Erreur réseau. Impossible de contacter le serveur. Vérifiez votre connexion Internet ou que le serveur est déployé correctement.";
+                } else {
+                    errorDiv.textContent = "Erreur communication serveur: " + error.message;
+                }
                 errorDiv.style.display = 'block';
             } finally {
                 setButtonLoading('login-button', false, 'fas fa-sign-in-alt');

@@ -205,16 +205,36 @@ async function resolveGeminiModel(apiKey) {
 
 // ------------------------- Auth & CRUD simples -------------------------
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    mongoConfigured: !!MONGO_URL,
+    geminiConfigured: !!GEMINI_API_KEY
+  });
+});
+
 app.post('/api/login', (req, res) => {
   try {
+    console.log('[LOGIN] Requête reçue de:', req.headers['x-forwarded-for'] || req.connection.remoteAddress);
     const { username, password } = req.body;
+    console.log('[LOGIN] Tentative pour utilisateur:', username);
+    
+    if (!username || !password) {
+      console.log('[LOGIN] Username ou password manquant');
+      return res.status(400).json({ success: false, message: 'Nom d\'utilisateur et mot de passe requis' });
+    }
+    
     if (validUsers[username] && validUsers[username] === password) {
+      console.log('[LOGIN] Authentification réussie pour:', username);
       res.status(200).json({ success: true, username: username });
     } else {
+      console.log('[LOGIN] Échec authentification pour:', username);
       res.status(401).json({ success: false, message: 'Identifiants invalides' });
     }
   } catch (error) {
-    console.error('CRASH in /api/login:', error);
+    console.error('[LOGIN] CRASH in /api/login:', error);
     res.status(500).json({ success: false, message: 'Erreur interne du serveur.' });
   }
 });
