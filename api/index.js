@@ -245,8 +245,33 @@ app.get('/api/plans/:week', async (req, res) => {
   try {
     const db = await connectToDatabase();
     const planDocument = await db.collection('plans').findOne({ week: weekNumber });
+    
     if (planDocument) {
-      res.status(200).json({ planData: planDocument.data || [], classNotes: planDocument.classNotes || {} });
+      // Récupérer tous les plans de leçon disponibles pour cette semaine
+      const lessonPlans = await db.collection('lessonPlans')
+        .find({ week: weekNumber }, { projection: { _id: 1 } })
+        .toArray();
+      
+      // Créer un Set des IDs disponibles pour recherche rapide
+      const availableLessonPlanIds = new Set(lessonPlans.map(lp => lp._id));
+      
+      // Enrichir les données avec lessonPlanId si disponible
+      const enrichedData = (planDocument.data || []).map(row => {
+        const enseignant = row[findKey(row, 'Enseignant')] || '';
+        const classe = row[findKey(row, 'Classe')] || '';
+        const matiere = row[findKey(row, 'Matière')] || '';
+        const periode = row[findKey(row, 'Période')] || '';
+        const jour = row[findKey(row, 'Jour')] || '';
+        
+        const potentialLessonPlanId = `${weekNumber}_${enseignant}_${classe}_${matiere}_${periode}_${jour}`.replace(/\s+/g, '_');
+        
+        if (availableLessonPlanIds.has(potentialLessonPlanId)) {
+          return { ...row, lessonPlanId: potentialLessonPlanId };
+        }
+        return row;
+      });
+      
+      res.status(200).json({ planData: enrichedData, classNotes: planDocument.classNotes || {} });
     } else {
       res.status(200).json({ planData: [], classNotes: {} });
     }
