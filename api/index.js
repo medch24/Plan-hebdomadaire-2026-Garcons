@@ -256,6 +256,8 @@ app.get('/api/plans/:week', async (req, res) => {
       const availableLessonPlanIds = new Set(lessonPlans.map(lp => lp._id));
       
       // Enrichir les données avec lessonPlanId si disponible
+      console.log(`📋 Plans disponibles pour S${weekNumber}:`, Array.from(availableLessonPlanIds));
+      
       const enrichedData = (planDocument.data || []).map(row => {
         const enseignant = row[findKey(row, 'Enseignant')] || '';
         const classe = row[findKey(row, 'Classe')] || '';
@@ -266,7 +268,10 @@ app.get('/api/plans/:week', async (req, res) => {
         const potentialLessonPlanId = `${weekNumber}_${enseignant}_${classe}_${matiere}_${periode}_${jour}`.replace(/\s+/g, '_');
         
         if (availableLessonPlanIds.has(potentialLessonPlanId)) {
+          console.log(`✅ lessonPlanId trouvé: ${potentialLessonPlanId}`);
           return { ...row, lessonPlanId: potentialLessonPlanId };
+        } else {
+          console.log(`⚠️ lessonPlanId non trouvé: ${potentialLessonPlanId}`);
         }
         return row;
       });
