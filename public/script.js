@@ -255,6 +255,7 @@
                 
                 // Afficher le bouton seulement si un plan de leçon existe ET ce n'est pas une matière arabe
                 if (rowObj && rowObj.lessonPlanId && !isArabicSubject) {
+                    console.log('✅ Bouton téléchargement ajouté pour:', rowObj.lessonPlanId);
                     const lessonBtn = document.createElement('button');
                     lessonBtn.innerHTML = '<i class="fas fa-file-download"></i>';
                     lessonBtn.title = 'Télécharger Plan de Leçon';
@@ -262,6 +263,14 @@
                     lessonBtn.style.marginLeft = '5px';
                     lessonBtn.onclick = () => downloadLessonPlan(rowObj);
                     actTd.appendChild(lessonBtn);
+                } else if (rowObj) {
+                    // Debug: pourquoi le bouton n'apparaît pas
+                    if (!rowObj.lessonPlanId) {
+                        console.log('⚠️ Pas de lessonPlanId pour:', rowObj);
+                    }
+                    if (isArabicSubject) {
+                        console.log('⚠️ Matière arabe exclue:', matiere);
+                    }
                 }
                 tr.appendChild(actTd);
                 if (updK && tHead && tHead.querySelector('.updated-at-column')) {
@@ -827,6 +836,7 @@
             }
             
             // Peupler les checkboxes
+            populateLessonPlanClasses();
             
             // Afficher la modal
             document.getElementById('lessonPlanModal').style.display = 'block';
