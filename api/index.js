@@ -717,6 +717,12 @@ ${jsonStructure}`;
     if (!aiResponse.ok) {
       const errorBody = await aiResponse.json().catch(() => ({}));
       console.error("❌ [AI Lesson Plan] Erreur de l'API Google AI:", JSON.stringify(errorBody, null, 2));
+      
+      // Message spécifique pour quota dépassé
+      if (aiResponse.status === 429) {
+        throw new Error(`⚠️ QUOTA API GEMINI DÉPASSÉ : Limite gratuite atteinte (20 requêtes/jour). Veuillez réessayer demain ou upgrader votre compte Google AI. Détails : ${errorBody.error?.message || 'Quota dépassé'}`);
+      }
+      
       throw new Error(`[${aiResponse.status} ${aiResponse.statusText}] ${errorBody.error?.message || "Erreur inconnue de l'API."}`);
     }
     

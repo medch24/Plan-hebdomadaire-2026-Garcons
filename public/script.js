@@ -998,7 +998,7 @@
                 setButtonLoading('generateAllLessonPlansBtn', false, 'fas fa-robot');
                 
                 // Fermer la modal automatiquement après génération
-                closeLessonPlanModal();
+                setTimeout(() => closeLessonPlanModal(), 500);
             }
         }
 
