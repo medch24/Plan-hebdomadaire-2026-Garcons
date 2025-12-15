@@ -297,11 +297,12 @@ async function generateMultipleLessonPlans(selectedClasses, selectedSubjects) {
                         }
                     }
                     
-                    // Convertir en base64 pour MongoDB
+                    // ✅ FONCTIONNALITÉ 1: AUTO-ENREGISTREMENT AUTOMATIQUE
+                    // Convertir en base64 pour MongoDB (enregistrement automatique)
                     const fileBuffer = await blob.arrayBuffer();
                     const base64Buffer = btoa(String.fromCharCode(...new Uint8Array(fileBuffer)));
                     
-                    // Sauvegarder dans MongoDB
+                    // Sauvegarder AUTOMATIQUEMENT dans MongoDB après chaque génération
                     const saveResponse = await fetch('/api/save-lesson-plan', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -314,8 +315,13 @@ async function generateMultipleLessonPlans(selectedClasses, selectedSubjects) {
                     });
                     
                     if (saveResponse.ok) {
+                        const saveResult = await saveResponse.json();
+                        // Mettre à jour l'ID du plan de leçon dans les données locales
+                        if (saveResult.lessonPlanId) {
+                            rowData.lessonPlanId = saveResult.lessonPlanId;
+                        }
                         successCount++;
-                        console.log(`✅ Plan ${i + 1}/${rowsToGenerate.length} sauvegardé`);
+                        console.log(`✅ Plan ${i + 1}/${rowsToGenerate.length} généré ET sauvegardé automatiquement`);
                     } else {
                         console.error('Erreur sauvegarde MongoDB:', await saveResponse.text());
                         errorCount++;

@@ -1199,4 +1199,185 @@ app.get('/api/vapid-public-key', (req, res) => {
   res.status(200).json({ publicKey: VAPID_PUBLIC_KEY });
 });
 
+// ✅ FONCTIONNALITÉ 3: Système d'alertes automatiques hebdomadaires
+// Route pour vérifier et envoyer des alertes TOUTES LES 3 HEURES depuis le LUNDI
+// Cette route doit être appelée par un CRON job externe (GitHub Actions, cron-job.org, etc.)
+app.post('/api/send-weekly-reminders', async (req, res) => {
+  try {
+    const { apiKey } = req.body;
+    
+    // Sécurité basique avec clé API
+    const CRON_API_KEY = process.env.CRON_API_KEY || 'default-cron-key-change-me';
+    if (apiKey !== CRON_API_KEY) {
+      return res.status(401).json({ message: 'Non autorisé. Clé API invalide.' });
+    }
+
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0 = Dimanche, 1 = Lundi, ..., 6 = Samedi
+    const hourOfDay = now.getHours();
+
+    console.log(`📅 [Weekly Reminders] Vérification: ${now.toISOString()} - Jour: ${dayOfWeek}, Heure: ${hourOfDay}`);
+
+    // ⚠️ IMPORTANT: N'envoyer des alertes QUE le LUNDI (jour 1)
+    // Le CRON doit tourner toutes les 3 heures uniquement le lundi
+    if (dayOfWeek !== 1) {
+      return res.status(200).json({ 
+        message: 'Pas lundi aujourd\'hui. Aucune alerte envoyée.',
+        day: ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'][dayOfWeek],
+        timestamp: now.toISOString()
+      });
+    }
+
+    // Déterminer la semaine actuelle
+    let currentWeek = null;
+    
+    for (const [week, dates] of Object.entries(specificWeekDateRangesNode)) {
+      const startDate = new Date(dates.start + 'T00:00:00Z');
+      const endDate = new Date(dates.end + 'T23:59:59Z');
+      
+      if (now >= startDate && now <= endDate) {
+        currentWeek = parseInt(week, 10);
+        break;
+      }
+    }
+
+    if (!currentWeek) {
+      return res.status(200).json({ message: 'Aucune semaine active actuellement.' });
+    }
+
+    console.log(`📅 [Weekly Reminders] Semaine active: ${currentWeek}`);
+
+    // Récupérer les données de la semaine
+    const db = await connectToDatabase();
+    const planDocument = await db.collection('plans').findOne({ week: currentWeek });
+    
+    if (!planDocument || !planDocument.data || planDocument.data.length === 0) {
+      return res.status(200).json({ 
+        message: `Aucune donnée pour la semaine ${currentWeek}.`,
+        week: currentWeek
+      });
+    }
+
+    // Trouver les enseignants avec des travaux incomplets
+    const incompleteTeachers = {};
+    const planData = planDocument.data;
+    
+    planData.forEach(item => {
+      const teacher = item[findKey(item, 'Enseignant')];
+      const taskVal = item[findKey(item, 'Travaux de classe')];
+      const className = item[findKey(item, 'Classe')];
+      
+      // Un enseignant est incomplet si au moins un "Travaux de classe" est vide
+      if (teacher && className && (taskVal == null || String(taskVal).trim() === '')) {
+        if (!incompleteTeachers[teacher]) {
+          incompleteTeachers[teacher] = new Set();
+        }
+        incompleteTeachers[teacher].add(className);
+      }
+    });
+
+    const teachersToNotify = Object.keys(incompleteTeachers);
+    console.log(`📊 [Weekly Reminders] ${teachersToNotify.length} enseignants incomplets:`, teachersToNotify);
+
+    if (teachersToNotify.length === 0) {
+      return res.status(200).json({ 
+        message: 'Tous les enseignants ont complété leurs plans.',
+        week: currentWeek,
+        timestamp: now.toISOString()
+      });
+    }
+
+    // Récupérer les abonnements push depuis MongoDB
+    const subscriptions = await db.collection('pushSubscriptions').find({}).toArray();
+    
+    let notificationsSent = 0;
+    const notificationResults = [];
+
+    // Envoyer des notifications à chaque enseignant incomplet
+    for (const teacher of teachersToNotify) {
+      const subscription = subscriptions.find(sub => sub.username === teacher);
+      
+      if (subscription && subscription.subscription) {
+        const classes = [...incompleteTeachers[teacher]].sort().join(', ');
+        const lang = getTeacherLanguage(teacher);
+        const msgs = notificationMessages[lang];
+        
+        // Message de rappel avec urgence
+        const message = {
+          title: msgs.reminderTitle,
+          body: msgs.reminderBody(teacher, currentWeek),
+          icon: 'https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299',
+          badge: 'https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299',
+          requireInteraction: true,
+          vibrate: [200, 100, 200, 100, 200],
+          tag: `plan-reminder-${currentWeek}-${Date.now()}`, // Tag unique pour chaque rappel
+          renotify: true, // Force la réaffichage même si tag similaire
+          data: {
+            url: 'https://plan-hebdomadaire-2026-boys.vercel.app',
+            week: currentWeek,
+            teacher: teacher,
+            classes: classes,
+            lang: lang,
+            playSound: true,
+            timestamp: now.toISOString()
+          }
+        };
+
+        try {
+          const payload = JSON.stringify(message);
+          await webpush.sendNotification(subscription.subscription, payload);
+          
+          notificationResults.push({
+            teacher: teacher,
+            classes: classes,
+            language: lang,
+            status: 'sent',
+            timestamp: now.toISOString()
+          });
+          
+          notificationsSent++;
+          console.log(`✅ [Weekly Reminders] Notification envoyée à ${teacher} (${lang})`);
+        } catch (error) {
+          console.error(`❌ [Weekly Reminders] Erreur notification pour ${teacher}:`, error);
+          notificationResults.push({
+            teacher: teacher,
+            status: 'error',
+            error: error.message
+          });
+          
+          // Si l'abonnement est invalide (410 Gone), le supprimer
+          if (error.statusCode === 410) {
+            console.log(`🗑️ Suppression de l'abonnement invalide pour ${teacher}`);
+            await db.collection('pushSubscriptions').deleteOne({ username: teacher });
+          }
+        }
+      } else {
+        console.log(`ℹ️ [Weekly Reminders] ${teacher} n'a pas d'abonnement push`);
+        notificationResults.push({
+          teacher: teacher,
+          status: 'no_subscription'
+        });
+      }
+    }
+
+    res.status(200).json({
+      message: `Rappels hebdomadaires envoyés pour la semaine ${currentWeek}.`,
+      week: currentWeek,
+      day: 'Lundi',
+      hour: hourOfDay,
+      incompleteCount: teachersToNotify.length,
+      notificationsSent: notificationsSent,
+      timestamp: now.toISOString(),
+      results: notificationResults
+    });
+
+  } catch (error) {
+    console.error('❌ [Weekly Reminders] Erreur:', error);
+    res.status(500).json({ 
+      message: 'Erreur serveur.',
+      error: error.message 
+    });
+  }
+});
+
 module.exports = app;
