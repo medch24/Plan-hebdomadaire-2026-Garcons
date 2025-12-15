@@ -263,7 +263,16 @@ app.get('/api/plans/:week', async (req, res) => {
         const classe = row[findKey(row, 'Classe')] || '';
         const matiere = row[findKey(row, 'Matière')] || '';
         const periode = row[findKey(row, 'Période')] || '';
-        const jour = row[findKey(row, 'Jour')] || '';
+        let jour = row[findKey(row, 'Jour')] || '';
+        
+        // Extraire uniquement le nom du jour (Dimanche, Lundi, etc.) si format "Lundi 15 Décembre 2025"
+        const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
+        for (const dayName of dayNames) {
+          if (jour.includes(dayName)) {
+            jour = dayName;
+            break;
+          }
+        }
         
         const potentialLessonPlanId = `${weekNumber}_${enseignant}_${classe}_${matiere}_${periode}_${jour}`.replace(/\s+/g, '_');
         
@@ -272,6 +281,8 @@ app.get('/api/plans/:week', async (req, res) => {
           return { ...row, lessonPlanId: potentialLessonPlanId };
         } else {
           console.log(`⚠️ lessonPlanId non trouvé: ${potentialLessonPlanId}`);
+          console.log(`   Cherché: ${potentialLessonPlanId}`);
+          console.log(`   Disponibles:`, Array.from(availableLessonPlanIds).slice(0, 3));
         }
         return row;
       });
@@ -827,7 +838,16 @@ app.post('/api/save-lesson-plan', async (req, res) => {
     const classe = rowData[findKey(rowData, 'Classe')] || '';
     const matiere = rowData[findKey(rowData, 'Matière')] || '';
     const periode = rowData[findKey(rowData, 'Période')] || '';
-    const jour = rowData[findKey(rowData, 'Jour')] || '';
+    let jour = rowData[findKey(rowData, 'Jour')] || '';
+    
+    // 🔧 CORRECTION: Extraire uniquement le nom du jour (Dimanche, Lundi, etc.)
+    const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
+    for (const dayName of dayNames) {
+      if (jour.includes(dayName)) {
+        jour = dayName;
+        break;
+      }
+    }
     
     const lessonPlanId = `${week}_${enseignant}_${classe}_${matiere}_${periode}_${jour}`.replace(/\s+/g, '_');
     
