@@ -248,7 +248,7 @@ async function startGenerateAllLessonPlans() {
     await generateMultipleLessonPlans(selectedClasses, selectedSubjects);
 }
 
-// Générer les plans pour toutes les combinaisons classe/matière sélectionnées
+// ✅ CORRECTION: Générer les plans ET créer un ZIP pour téléchargement automatique
 async function generateMultipleLessonPlans(selectedClasses, selectedSubjects) {
     const classKey = findHKey('Classe');
     const matiereKey = findHKey('Matière');
@@ -271,6 +271,7 @@ async function generateMultipleLessonPlans(selectedClasses, selectedSubjects) {
     
     let successCount = 0;
     let errorCount = 0;
+    const generatedFiles = []; // 📦 Stocker les fichiers générés pour le ZIP
     
     try {
         for (let i = 0; i < rowsToGenerate.length; i++) {
@@ -298,11 +299,10 @@ async function generateMultipleLessonPlans(selectedClasses, selectedSubjects) {
                     }
                     
                     // ✅ FONCTIONNALITÉ 1: AUTO-ENREGISTREMENT AUTOMATIQUE
-                    // Convertir en base64 pour MongoDB (enregistrement automatique)
                     const fileBuffer = await blob.arrayBuffer();
                     const base64Buffer = btoa(String.fromCharCode(...new Uint8Array(fileBuffer)));
                     
-                    // Sauvegarder AUTOMATIQUEMENT dans MongoDB après chaque génération
+                    // Sauvegarder AUTOMATIQUEMENT dans MongoDB
                     const saveResponse = await fetch('/api/save-lesson-plan', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -316,12 +316,18 @@ async function generateMultipleLessonPlans(selectedClasses, selectedSubjects) {
                     
                     if (saveResponse.ok) {
                         const saveResult = await saveResponse.json();
-                        // Mettre à jour l'ID du plan de leçon dans les données locales
                         if (saveResult.lessonPlanId) {
                             rowData.lessonPlanId = saveResult.lessonPlanId;
                         }
+                        
+                        // 📦 Ajouter le fichier à la liste pour le ZIP
+                        generatedFiles.push({
+                            filename: filename,
+                            blob: blob
+                        });
+                        
                         successCount++;
-                        console.log(`✅ Plan ${i + 1}/${rowsToGenerate.length} généré ET sauvegardé automatiquement`);
+                        console.log(`✅ Plan ${i + 1}/${rowsToGenerate.length} généré ET sauvegardé`);
                     } else {
                         console.error('Erreur sauvegarde MongoDB:', await saveResponse.text());
                         errorCount++;
@@ -340,11 +346,46 @@ async function generateMultipleLessonPlans(selectedClasses, selectedSubjects) {
             await new Promise(resolve => setTimeout(resolve, 500));
         }
         
+        updateProgressBar(95);
+        
+        // 📦 NOUVEAU: Créer un ZIP avec tous les fichiers générés
+        if (generatedFiles.length > 0) {
+            console.log(`📦 Création du ZIP avec ${generatedFiles.length} fichier(s)...`);
+            
+            try {
+                // Utiliser JSZip (chargé via CDN dans index.html)
+                if (typeof JSZip === 'undefined') {
+                    throw new Error('JSZip non chargé');
+                }
+                
+                const zip = new JSZip();
+                
+                // Ajouter chaque fichier au ZIP
+                for (const file of generatedFiles) {
+                    zip.file(file.filename, file.blob);
+                }
+                
+                // Générer le ZIP
+                const zipBlob = await zip.generateAsync({ type: 'blob' });
+                
+                // Télécharger automatiquement le ZIP
+                const zipFilename = `Plans_Lecon_Semaine${currentWeek}_${new Date().toISOString().split('T')[0]}.zip`;
+                if (typeof saveAs === 'function') {
+                    saveAs(zipBlob, zipFilename);
+                    console.log(`✅ ZIP téléchargé: ${zipFilename}`);
+                    displayAlert(`✅ ${successCount} plan(s) générés et téléchargés en ZIP !`, false);
+                } else {
+                    throw new Error('saveAs non disponible');
+                }
+            } catch (zipError) {
+                console.error('Erreur création ZIP:', zipError);
+                displayAlert(`✅ ${successCount} plan(s) sauvegardés (erreur ZIP: ${zipError.message})`, false);
+            }
+        }
+        
         updateProgressBar(100);
         
-        if (errorCount === 0) {
-            displayAlert(`✅ ${successCount} plan(s) de leçon généré(s) et sauvegardé(s) avec succès !`, false);
-        } else {
+        if (errorCount > 0) {
             displayAlert(`⚠️ ${successCount} réussis, ${errorCount} échoués`, false);
         }
         
