@@ -203,6 +203,157 @@ async function resolveGeminiModel(apiKey) {
   throw new Error("Aucun modèle compatible v1 trouvé pour votre clé (generateContent). Vérifiez l'accès de la clé et l'API activée.");
 }
 
+// ------------------------- Web Push Subscriptions -------------------------
+
+app.post('/api/subscribe', async (req, res) => {
+  try {
+    const subscription = req.body.subscription;
+    const username = req.body.username;
+    if (!subscription || !username) {
+      return res.status(400).json({ message: 'Subscription et username requis.' });
+    }
+
+    const db = await connectToDatabase();
+    // Utiliser l'endpoint comme _id pour garantir l'unicité de l'abonnement
+    await db.collection('subscriptions').updateOne(
+      { _id: subscription.endpoint },
+      { $set: { subscription: subscription, username: username, createdAt: new Date() } },
+      { upsert: true }
+    );
+
+    res.status(201).json({ message: 'Abonnement enregistré.' });
+  } catch (error) {
+    console.error('Erreur MongoDB /subscribe:', error);
+    res.status(500).json({ message: 'Erreur serveur.' });
+  }
+});
+
+app.post('/api/unsubscribe', async (req, res) => {
+  try {
+    const endpoint = req.body.endpoint;
+    if (!endpoint) {
+      return res.status(400).json({ message: 'Endpoint requis.' });
+    }
+
+    const db = await connectToDatabase();
+    await db.collection('subscriptions').deleteOne({ _id: endpoint });
+
+    res.status(200).json({ message: 'Abonnement supprimé.' });
+  } catch (error) {
+    console.error('Erreur MongoDB /unsubscribe:', error);
+    res.status(500).json({ message: 'Erreur serveur.' });
+  }
+});
+
+// ------------------------- Rappels Automatiques (Cron) -------------------------
+
+// Fonction utilitaire pour déterminer la semaine actuelle
+function getCurrentWeekNumber() {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0); // Utiliser UTC pour la comparaison avec les dates stockées
+
+  for (const week in specificWeekDateRangesNode) {
+    const dates = specificWeekDateRangesNode[week];
+    const startDate = new Date(dates.start + 'T00:00:00Z');
+    const endDate = new Date(dates.end + 'T00:00:00Z');
+
+    // Ajouter un jour à la date de fin pour inclure le dernier jour
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+
+    if (today >= startDate && today <= endDate) {
+      return parseInt(week, 10);
+    }
+  }
+  return null; // Semaine non trouvée
+}
+
+app.get('/api/send-reminders', async (req, res) => {
+  try {
+    const weekNumber = getCurrentWeekNumber();
+    if (!weekNumber) {
+      console.log('⚠️ Semaine actuelle non définie dans la configuration.');
+      return res.status(200).json({ message: 'Semaine actuelle non définie.' });
+    }
+
+    const db = await connectToDatabase();
+    const planDocument = await db.collection('plans').findOne({ week: weekNumber });
+
+    if (!planDocument || !planDocument.data || planDocument.data.length === 0) {
+      console.log(`⚠️ Aucun plan trouvé pour la semaine ${weekNumber}.`);
+      return res.status(200).json({ message: `Aucun plan trouvé pour la semaine ${weekNumber}.` });
+    }
+
+    // 1. Identifier les enseignants avec au moins une leçon vide
+    const teachersToRemind = new Set();
+    const leconKey = findKey(planDocument.data[0] || {}, 'Leçon');
+
+    if (leconKey) {
+      planDocument.data.forEach(row => {
+        const enseignantKey = findKey(row, 'Enseignant');
+        const enseignant = enseignantKey ? row[enseignantKey] : null;
+        const lecon = row[leconKey];
+
+        // Si l'enseignant est valide et la leçon est vide ou non définie
+        if (enseignant && (!lecon || lecon.trim() === '')) {
+          teachersToRemind.add(enseignant);
+        }
+      });
+    }
+
+    if (teachersToRemind.size === 0) {
+      console.log(`✅ Tous les plans de la semaine ${weekNumber} semblent complets.`);
+      return res.status(200).json({ message: 'Tous les plans sont complets. Aucun rappel envoyé.' });
+    }
+
+    console.log(`🔔 Enseignants à rappeler pour S${weekNumber}:`, Array.from(teachersToRemind));
+
+    // 2. Récupérer les abonnements pour ces enseignants
+    const subscriptions = await db.collection('subscriptions').find({
+      username: { $in: Array.from(teachersToRemind) }
+    }).toArray();
+
+    if (subscriptions.length === 0) {
+      console.log('⚠️ Aucun abonnement push trouvé pour les enseignants à rappeler.');
+      return res.status(200).json({ message: 'Aucun abonnement push trouvé.' });
+    }
+
+    // 3. Envoyer les notifications
+    const notificationPayload = JSON.stringify({
+      title: 'Rappel Plan Hebdomadaire',
+      body: `Veuillez compléter votre plan de leçon pour la semaine ${weekNumber}.`,
+      icon: '/icons/icon-192x192.png', // Assurez-vous que cette icône existe
+      data: {
+        url: '/', // URL à ouvrir lors du clic sur la notification
+        week: weekNumber
+      }
+    });
+
+    const sendPromises = subscriptions.map(sub => {
+      return webpush.sendNotification(sub.subscription, notificationPayload)
+        .then(() => console.log(`Notification envoyée à ${sub.username}`))
+        .catch(async (error) => {
+          console.error(`Échec envoi notification à ${sub.username}:`, error);
+          // Supprimer l'abonnement si l'erreur est 410 Gone (abonnement expiré)
+          if (error.statusCode === 410) {
+            await db.collection('subscriptions').deleteOne({ _id: sub.subscription.endpoint });
+            console.log(`Abonnement expiré pour ${sub.username} supprimé.`);
+          }
+        });
+    });
+
+    await Promise.allSettled(sendPromises);
+
+    res.status(200).json({ 
+      message: `${sendPromises.length} rappels tentés.`,
+      teachersReminded: Array.from(teachersToRemind)
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur serveur /send-reminders:', error);
+    res.status(500).json({ message: 'Erreur interne /send-reminders.' });
+  }
+});
+
 // ------------------------- Auth & CRUD simples -------------------------
 
 // Health check endpoint
@@ -255,6 +406,13 @@ app.get('/api/plans/:week', async (req, res) => {
       // Créer un Set des IDs disponibles pour recherche rapide
       const availableLessonPlanIds = new Set(lessonPlans.map(lp => lp._id));
       
+      // NEW LOGIC: Check for available weekly DOCX plans
+      const weeklyPlans = await db.collection('weeklyLessonPlans')
+        .find({ week: weekNumber }, { projection: { classe: 1 } })
+        .toArray();
+      
+      const availableWeeklyPlans = weeklyPlans.map(p => p.classe); // Array of class names
+      
       // Enrichir les données avec lessonPlanId si disponible
       console.log(`📋 Plans disponibles pour S${weekNumber}:`, Array.from(availableLessonPlanIds));
       
@@ -276,9 +434,13 @@ app.get('/api/plans/:week', async (req, res) => {
         return row;
       });
       
-      res.status(200).json({ planData: enrichedData, classNotes: planDocument.classNotes || {} });
+      res.status(200).json({ 
+          planData: enrichedData, 
+          classNotes: planDocument.classNotes || {},
+          availableWeeklyPlans: availableWeeklyPlans // NEW FIELD
+      });
     } else {
-      res.status(200).json({ planData: [], classNotes: {} });
+      res.status(200).json({ planData: [], classNotes: {}, availableWeeklyPlans: [] }); // NEW FIELD
     }
   } catch (error) {
     console.error('Erreur MongoDB /plans/:week:', error);
@@ -465,6 +627,32 @@ app.post('/api/generate-word', async (req, res) => {
 
     const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
     const filename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`;
+
+    // 1. Enregistrement du plan de leçon dans MongoDB
+    try {
+      const db = await connectToDatabase();
+      const lessonPlanId = `S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}`;
+      
+      await db.collection('weeklyLessonPlans').updateOne(
+          { _id: lessonPlanId },
+          { 
+              $set: { 
+                  week: weekNumber, 
+                  classe: classe, 
+                  filename: filename, 
+                  fileData: buf, 
+                  updatedAt: new Date() 
+              },
+              $setOnInsert: { createdAt: new Date() }
+          },
+          { upsert: true }
+      );
+      console.log(`✅ Plan de leçon ${lessonPlanId} enregistré dans MongoDB.`);
+    } catch (dbError) {
+      console.error(`❌ Erreur lors de l'enregistrement du plan de leçon dans MongoDB:`, dbError);
+      // On continue pour envoyer le fichier même en cas d'échec de l'enregistrement
+    }
+    // Fin 1. Enregistrement du plan de leçon dans MongoDB
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.send(buf);
@@ -474,10 +662,42 @@ app.post('/api/generate-word', async (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ message: 'Erreur interne /generate-word.' });
     }
-  }
-});
+	  }
+	});
 
-// --------------------- Génération Excel (workbook) ---------------------
+	// --------------------- Téléchargement Plan de Leçon (DOCX) ---------------------
+
+	app.get('/api/download-weekly-plan/:week/:classe', async (req, res) => {
+	  try {
+	    const weekNumber = Number(req.params.week);
+	    const classe = req.params.classe;
+	    if (!Number.isInteger(weekNumber) || !classe) {
+	      return res.status(400).json({ message: 'Semaine ou classe invalide.' });
+	    }
+
+	    const lessonPlanId = `S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}`;
+	    const db = await connectToDatabase();
+	    const planDocument = await db.collection('weeklyLessonPlans').findOne({ _id: lessonPlanId });
+
+	    if (!planDocument || !planDocument.fileData) {
+	      console.log(`⚠️ Plan de leçon non trouvé pour ${lessonPlanId}`);
+	      return res.status(404).json({ message: 'Plan de leçon non généré ou non trouvé.' });
+	    }
+
+	    console.log(`✅ Plan de leçon trouvé pour ${lessonPlanId}. Envoi du fichier.`);
+	    res.setHeader('Content-Disposition', `attachment; filename="${planDocument.filename}"`);
+	    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+	    res.send(planDocument.fileData.buffer); // fileData est un BSON Binary, on utilise .buffer pour le Buffer Node.js
+
+	  } catch (error) {
+	    console.error('❌ Erreur serveur /download-weekly-plan:', error);
+	    if (!res.headersSent) {
+	      res.status(500).json({ message: 'Erreur interne /download-weekly-plan.' });
+	    }
+	  }
+	});
+
+	// --------------------- Génération Excel (workbook) ---------------------
 
 app.post('/api/generate-excel-workbook', async (req, res) => {
   try {
@@ -1378,6 +1598,11 @@ app.post('/api/send-weekly-reminders', async (req, res) => {
       error: error.message 
     });
   }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
 
 module.exports = app;

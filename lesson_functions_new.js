@@ -53,6 +53,32 @@ function populateLessonPlanClasses() {
         
         wrapper.appendChild(checkbox);
         wrapper.appendChild(label);
+
+        // 2. Ajout du bouton de téléchargement
+        const downloadBtn = document.createElement('button');
+        downloadBtn.innerHTML = '<i class="fas fa-download"></i>';
+        downloadBtn.style.marginLeft = '10px';
+        downloadBtn.style.padding = '3px 8px';
+        downloadBtn.style.fontSize = '12px';
+        downloadBtn.style.cursor = 'pointer';
+        downloadBtn.setAttribute('aria-label', `Télécharger le plan pour ${cls}`);
+
+        // Vérifier si le plan est disponible
+        // window.availableWeeklyPlans est rempli par la fonction loadPlanData
+        if (window.availableWeeklyPlans && window.availableWeeklyPlans.includes(cls)) {
+            downloadBtn.title = `Télécharger le plan hebdomadaire pour ${cls}`;
+            downloadBtn.onclick = () => downloadWeeklyPlan(currentWeek, cls);
+            downloadBtn.disabled = false;
+            downloadBtn.style.color = '#28a745'; // Vert
+            downloadBtn.style.borderColor = '#28a745';
+        } else {
+            downloadBtn.title = 'Le plan hebdomadaire pour cette classe n\'est pas encore généré par le coordinateur.';
+            downloadBtn.disabled = true;
+            downloadBtn.style.color = '#ccc';
+            downloadBtn.style.borderColor = '#ccc';
+        }
+
+        wrapper.appendChild(downloadBtn);
         container.appendChild(wrapper);
     });
     
@@ -358,5 +384,54 @@ async function generateMultipleLessonPlans(selectedClasses, selectedSubjects) {
     } finally {
         hideProgressBar();
         setButtonLoading('generateAllLessonPlansBtn', false, 'fas fa-robot');
+    }
+}
+
+// Fonction de comparaison de classes (pour le tri)
+function compareClasses(a, b) {
+    // Logique de tri simple (peut être ajustée si nécessaire)
+    return a.localeCompare(b);
+}
+
+// Fonction de téléchargement du plan hebdomadaire
+async function downloadWeeklyPlan(week, classe) {
+    if (!week || !classe) {
+        displayAlert('Semaine ou classe non spécifiée.', true);
+        return;
+    }
+
+    const url = `/api/download-weekly-plan/${week}/${classe}`;
+    displayAlert(`Téléchargement du plan pour ${classe}...`);
+
+    try {
+        const response = await fetch(url);
+
+        if (response.ok) {
+            const blob = await response.blob();
+            const contentDisposition = response.headers.get('content-disposition');
+            let filename = `Plan_hebdomadaire_S${week}_${classe}.docx`;
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(;|$)/i);
+                if (filenameMatch && filenameMatch[1]) {
+                    filename = filenameMatch[1];
+                }
+            }
+
+            const link = document.createElement('a');
+            link.href = window.URL.createObjectURL(blob);
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(link.href);
+
+            displayAlert(`Plan pour ${classe} téléchargé avec succès.`, false, 3000);
+        } else {
+            const errorData = await response.json();
+            displayAlert(`Erreur: ${errorData.message || 'Impossible de télécharger le plan.'}`, true);
+        }
+    } catch (error) {
+        console.error('Erreur lors du téléchargement:', error);
+        displayAlert('Erreur réseau lors du téléchargement du plan.', true);
     }
 }
