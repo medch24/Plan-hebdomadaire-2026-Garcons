@@ -270,124 +270,106 @@ async function startGenerateAllLessonPlans() {
     
     if (!confirmation) return;
     
-    // Génération
-    await generateMultipleLessonPlans(selectedClasses, selectedSubjects);
-}
+// Génération
+	    await generateWeeklyPlansZip(selectedClasses, selectedSubjects);
+	}
 
-// Générer les plans pour toutes les combinaisons classe/matière sélectionnées
-async function generateMultipleLessonPlans(selectedClasses, selectedSubjects) {
-    const classKey = findHKey('Classe');
-    const matiereKey = findHKey('Matière');
-    
-    // Filtrer les lignes correspondantes
-    const rowsToGenerate = planData.filter(item => 
-        selectedClasses.includes(item[classKey]) && selectedSubjects.includes(item[matiereKey])
-    );
-    
-    if (rowsToGenerate.length === 0) {
-        displayAlert("Aucune ligne trouvée pour ces combinaisons classe/matière.", true);
-        return;
-    }
-    
-    console.log(`${rowsToGenerate.length} ligne(s) à traiter`);
-    
-    displayAlert(`Génération de ${rowsToGenerate.length} plan(s) de leçon...`, false);
-    setButtonLoading('generateAllLessonPlansBtn', true, 'fas fa-robot');
-    showProgressBar();
-    
-    let successCount = 0;
-    let errorCount = 0;
-    
-    try {
-        for (let i = 0; i < rowsToGenerate.length; i++) {
-            const rowData = rowsToGenerate[i];
-            const progress = Math.round(((i + 1) / rowsToGenerate.length) * 95);
-            updateProgressBar(progress);
-            
-            try {
-                // Générer le plan avec l'IA
-                const response = await fetch('/api/generate-ai-lesson-plan', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ week: currentWeek, rowData: rowData })
-                });
-                
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const contentDisposition = response.headers.get('content-disposition');
-                    let filename = `plan_lecon_${rowData[classKey]}_${rowData[matiereKey]}_${i + 1}.docx`;
-                    if (contentDisposition) {
-                        const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(;|$)/i);
-                        if (filenameMatch && filenameMatch[1]) {
-                            filename = filenameMatch[1];
-                        }
-                    }
-                    
-                    // ✅ FONCTIONNALITÉ 1: AUTO-ENREGISTREMENT AUTOMATIQUE
-                    // Convertir en base64 pour MongoDB (enregistrement automatique)
-                    const fileBuffer = await blob.arrayBuffer();
-                    const base64Buffer = btoa(String.fromCharCode(...new Uint8Array(fileBuffer)));
-                    
-                    // Sauvegarder AUTOMATIQUEMENT dans MongoDB après chaque génération
-                    const saveResponse = await fetch('/api/save-lesson-plan', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            week: currentWeek, 
-                            rowData: rowData,
-                            fileBuffer: base64Buffer,
-                            filename: filename
-                        })
-                    });
-                    
-                    if (saveResponse.ok) {
-                        const saveResult = await saveResponse.json();
-                        // Mettre à jour l'ID du plan de leçon dans les données locales
-                        if (saveResult.lessonPlanId) {
-                            rowData.lessonPlanId = saveResult.lessonPlanId;
-                        }
-                        successCount++;
-                        console.log(`✅ Plan ${i + 1}/${rowsToGenerate.length} généré ET sauvegardé automatiquement`);
-                    } else {
-                        console.error('Erreur sauvegarde MongoDB:', await saveResponse.text());
-                        errorCount++;
-                    }
-                } else {
-                    const errorResult = await response.json().catch(() => ({ message: "Erreur inconnue" }));
-                    console.error(`Erreur génération ${i + 1}:`, errorResult.message);
-                    errorCount++;
-                }
-            } catch (error) {
-                console.error(`Erreur ligne ${i + 1}:`, error);
-                errorCount++;
-            }
-            
-            // Petit délai entre chaque génération
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        
-        updateProgressBar(100);
-        
-        if (errorCount === 0) {
-            displayAlert(`✅ ${successCount} plan(s) de leçon généré(s) et sauvegardé(s) avec succès !`, false);
-        } else {
-            displayAlert(`⚠️ ${successCount} réussis, ${errorCount} échoués`, false);
-        }
-        
-        // Recharger les données pour afficher les boutons de téléchargement
-        await loadPlanForWeek();
-        
-    } catch (error) {
-        console.error("Erreur génération plans:", error);
-        displayAlert('Erreur lors de la génération des plans de leçon.', true);
-        updateProgressBar(0);
-    } finally {
-        hideProgressBar();
-        setButtonLoading('generateAllLessonPlansBtn', false, 'fas fa-robot');
-    }
-}
+	// Générer les plans pour toutes les combinaisons classe/matière sélectionnées et les télécharger en ZIP
+	async function generateWeeklyPlansZip(selectedClasses, selectedSubjects) {
+	    const classKey = findHKey('Classe');
+	    const matiereKey = findHKey('Matière');
+	    
+	    // Filtrer les lignes correspondantes
+	    const rowsToGenerate = planData.filter(item => 
+	        selectedClasses.includes(item[classKey]) && selectedSubjects.includes(item[matiereKey])
+	    );
+	    
+	    if (rowsToGenerate.length === 0) {
+	        displayAlert("Aucune ligne trouvée pour ces combinaisons classe/matière.", true);
+	        return;
+	    }
+	    
+	    // Extraire les données nécessaires pour le backend
+	    const dataToSend = rowsToGenerate.map(row => {
+	        const newRow = {};
+	        headers.forEach(header => {
+	            newRow[header] = row[header];
+	        });
+	        return newRow;
+	    });
+	    
+	    // Récupérer les notes de classe
+	    const notesToSend = {};
+	    selectedClasses.forEach(cls => {
+	        notesToSend[cls] = weeklyClassNotes[cls] || '';
+	    });
+	    
+	    console.log(`Génération ZIP pour ${selectedClasses.length} classe(s) et ${selectedSubjects.length} matière(s)`);
+	    
+	    displayAlert(`Génération du fichier ZIP contenant ${selectedClasses.length} plan(s) de leçon...`, false);
+	    setButtonLoading('generateAllLessonPlansBtn', true, 'fas fa-robot');
+	    showProgressBar();
+	    
+	    try {
+	        const response = await fetch('/api/generate-weekly-plans-zip', {
+	            method: 'POST',
+	            headers: { 'Content-Type': 'application/json' },
+	            body: JSON.stringify({ 
+	                week: currentWeek, 
+	                classes: selectedClasses, 
+	                data: dataToSend,
+	                notes: notesToSend
+	            })
+	        });
+	        
+	        if (response.ok) {
+	            const blob = await response.blob();
+	            const contentDisposition = response.headers.get('content-disposition');
+	            let filename = `Plans_Hebdomadaires_S${currentWeek}.zip`;
+	            
+	            if (contentDisposition) {
+	                const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(;|$)/i);
+	                if (filenameMatch && filenameMatch[1]) {
+	                    filename = filenameMatch[1];
+	                }
+	            }
+	            
+	            // Téléchargement du fichier ZIP
+	            const link = document.createElement('a');
+	            link.href = window.URL.createObjectURL(blob);
+	            link.download = filename;
+	            document.body.appendChild(link);
+	            link.click();
+	            document.body.removeChild(link);
+	            window.URL.revokeObjectURL(link.href);
+	            
+	            displayAlert(`✅ Fichier ZIP '${filename}' généré et téléchargé avec succès !`, false, 5000);
+	            
+	            // Recharger les données pour mettre à jour l'état des boutons de téléchargement individuels
+	            await loadPlanForWeek();
+	            
+	        } else {
+	            const errorText = await response.text();
+	            let errorMessage = `Erreur serveur: ${errorText}`;
+	            try {
+	                const errorJson = JSON.parse(errorText);
+	                errorMessage = errorJson.message || errorMessage;
+	            } catch (e) {
+	                // Ignorer l'erreur de parsing si ce n'est pas du JSON
+	            }
+	            displayAlert(`❌ Échec de la génération ZIP: ${errorMessage}`, true);
+	        }
+	        
+	    } catch (error) {
+	        console.error("Erreur génération ZIP:", error);
+	        displayAlert('Erreur réseau lors de la génération du fichier ZIP.', true);
+	    } finally {
+	        hideProgressBar();
+	        setButtonLoading('generateAllLessonPlansBtn', false, 'fas fa-robot');
+	    }
+	}
 
-// Fonction de comparaison de classes (pour le tri)
+	// Fonction de comparaison de classes (pour le tri)
 function compareClasses(a, b) {
     // Logique de tri simple (peut être ajustée si nécessaire)
     return a.localeCompare(b);

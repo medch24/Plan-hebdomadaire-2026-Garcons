@@ -8,6 +8,7 @@ const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
 const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
+const archiver = require('archiver');
 const webpush = require('web-push');
 
 // ========================================================================
@@ -665,6 +666,158 @@ app.post('/api/generate-word', async (req, res) => {
 	  }
 	});
 
+	// --------------------- Génération ZIP (Plans de Leçon Multiples) ---------------------
+
+	app.post('/api/generate-weekly-plans-zip', async (req, res) => {
+	  try {
+	    const { week, classes, data, notes } = req.body;
+	    const weekNumber = Number(week);
+	    if (!Number.isInteger(weekNumber) || !Array.isArray(classes) || !Array.isArray(data)) {
+	      return res.status(400).json({ message: 'Données invalides (semaine, classes ou data manquantes).' });
+	    }
+
+	    // Configuration du ZIP
+	    const archive = archiver('zip', { zlib: { level: 9 } });
+	    const filename = `Plans_Hebdomadaires_S${weekNumber}_${classes.length}_Classes.zip`;
+
+	    res.setHeader('Content-Type', 'application/zip');
+	    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+	    archive.pipe(res);
+
+	    const dayOrder = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi"];
+	    const datesNode = specificWeekDateRangesNode[weekNumber];
+	    let weekStartDateNode = null;
+	    if (datesNode?.start) {
+	      weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
+	    }
+	    if (!weekStartDateNode || isNaN(weekStartDateNode.getTime())) {
+	      archive.abort();
+	      return res.status(500).json({ message: `Dates serveur manquantes pour S${weekNumber}.` });
+	    }
+
+	    let templateBuffer;
+	    try {
+	      const response = await fetch(WORD_TEMPLATE_URL);
+	      if (!response.ok) throw new Error(`Échec modèle Word (${response.status})`);
+	      templateBuffer = Buffer.from(await response.arrayBuffer());
+	    } catch (e) {
+	      console.error("Erreur de récupération du modèle Word:", e);
+	      archive.abort();
+	      return res.status(500).json({ message: `Erreur récup modèle Word.` });
+	    }
+
+	    let plageSemaineText = `Semaine ${weekNumber}`;
+	    if (datesNode?.start && datesNode?.end) {
+	      const startD = new Date(datesNode.start + 'T00:00:00Z');
+	      const endD = new Date(datesNode.end + 'T00:00:00Z');
+	      if (!isNaN(startD.getTime()) && !isNaN(endD.getTime())) {
+	        plageSemaineText = `du ${formatDateFrenchNode(startD)} à ${formatDateFrenchNode(endD)}`;
+	      }
+	    }
+
+	    const sampleRow = data[0] || {};
+	    const jourKey = findKey(sampleRow, 'Jour'),
+	          periodeKey = findKey(sampleRow, 'Période'),
+	          matiereKey = findKey(sampleRow, 'Matière'),
+	          leconKey = findKey(sampleRow, 'Leçon'),
+	          travauxKey = findKey(sampleRow, 'Travaux de classe'),
+	          supportKey = findKey(sampleRow, 'Support'),
+	          devoirsKey = findKey(sampleRow, 'Devoirs');
+
+	    for (const classe of classes) {
+	      const classData = data.filter(item => item[findKey(item, 'Classe')] === classe);
+	      const classNotes = notes[classe] || '';
+
+	      if (classData.length === 0) {
+	        console.warn(`Aucune donnée trouvée pour la classe ${classe}. Sautée.`);
+	        continue;
+	      }
+
+	      const groupedByDay = {};
+	      classData.forEach(item => {
+	        const day = item[jourKey];
+	        if (day && dayOrder.includes(day)) {
+	          if (!groupedByDay[day]) groupedByDay[day] = [];
+	          groupedByDay[day].push(item);
+	        }
+	      });
+
+	      const joursData = dayOrder.map(dayName => {
+	        if (!groupedByDay[dayName]) return null;
+
+	        const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
+	        const formattedDate = dateOfDay ? formatDateFrenchNode(dateOfDay) : dayName;
+	        const sortedEntries = groupedByDay[dayName].sort((a, b) => (parseInt(a[periodeKey], 10) || 0) - (parseInt(b[periodeKey], 10) || 0));
+
+	        const matieres = sortedEntries.map(item => ({
+	          matiere: item[matiereKey] ?? "",
+	          Lecon: formatTextForWord(item[leconKey], { color: 'FF0000' }),
+	          travailDeClasse: formatTextForWord(item[travauxKey]),
+	          Support: formatTextForWord(item[supportKey], { color: 'FF0000', italic: true }),
+	          devoirs: formatTextForWord(item[devoirsKey], { color: '0000FF', italic: true })
+	        }));
+
+	        return { jourDateComplete: formattedDate, matieres: matieres };
+	      }).filter(Boolean);
+
+	      const templateData = {
+	        semaine: weekNumber,
+	        classe: classe,
+	        jours: joursData,
+	        notes: formatTextForWord(classNotes),
+	        plageSemaine: plageSemaineText
+	      };
+
+	      // Créer une nouvelle instance de Docxtemplater pour chaque classe
+	      const zip = new PizZip(templateBuffer);
+	      const doc = new Docxtemplater(zip, {
+	        paragraphLoop: true,
+	        nullGetter: () => "",
+	      });
+
+	      doc.render(templateData);
+
+	      const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+	      const docxFilename = `Plan_hebdomadaire_S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}.docx`;
+
+	      // Enregistrement du plan de leçon dans MongoDB (comme dans /api/generate-word)
+	      try {
+	        const db = await connectToDatabase();
+	        const lessonPlanId = `S${weekNumber}_${classe.replace(/[^a-z0-9]/gi, '_')}`;
+	        
+	        await db.collection('weeklyLessonPlans').updateOne(
+	            { _id: lessonPlanId },
+	            { 
+	                $set: { 
+	                    week: weekNumber, 
+	                    classe: classe, 
+	                    filename: docxFilename, 
+	                    fileData: buf, 
+	                    updatedAt: new Date() 
+	                },
+	                $setOnInsert: { createdAt: new Date() }
+	            },
+	            { upsert: true }
+	        );
+	        console.log(`✅ Plan de leçon ${lessonPlanId} enregistré dans MongoDB.`);
+	      } catch (dbError) {
+	        console.error(`❌ Erreur lors de l'enregistrement du plan de leçon dans MongoDB:`, dbError);
+	      }
+	      
+	      // Ajouter le DOCX au ZIP
+	      archive.append(buf, { name: docxFilename });
+	    }
+
+	    archive.finalize();
+
+	  } catch (error) {
+	    console.error('❌ Erreur serveur /generate-weekly-plans-zip:', error);
+	    if (!res.headersSent) {
+	      res.status(500).json({ message: 'Erreur interne /generate-weekly-plans-zip.' });
+	    }
+	  }
+	});
+
 	// --------------------- Téléchargement Plan de Leçon (DOCX) ---------------------
 
 	app.get('/api/download-weekly-plan/:week/:classe', async (req, res) => {
@@ -1125,6 +1278,149 @@ app.get('/api/lesson-plans/:week', async (req, res) => {
   } catch (error) {
     console.error('❌ Erreur récupération liste plans de leçon:', error);
     res.status(500).json({ message: 'Erreur lors de la récupération des plans de leçon.' });
+  }
+});
+
+// --------------------- Test de Rappels Forcé (Semaine 17) ---------------------
+
+app.post('/api/test-weekly-reminders', async (req, res) => {
+  try {
+    const { apiKey, weekNumber } = req.body;
+    const targetWeek = weekNumber || 17; // Par défaut à la semaine 17
+    
+    // Sécurité basique avec clé API
+    const CRON_API_KEY = process.env.CRON_API_KEY || 'default-cron-key-change-me';
+    if (apiKey !== CRON_API_KEY) {
+      return res.status(401).json({ message: 'Non autorisé. Clé API invalide.' });
+    }
+
+    console.log(`🧪 [Test Reminders] Test forcé pour la semaine ${targetWeek}`);
+
+    // Récupérer les données de la semaine
+    const db = await connectToDatabase();
+    const planDocument = await db.collection('plans').findOne({ week: targetWeek });
+    
+    if (!planDocument || !planDocument.data || planDocument.data.length === 0) {
+      return res.status(200).json({ 
+        message: `Aucune donnée pour la semaine ${targetWeek}.`,
+        week: targetWeek
+      });
+    }
+
+    // Trouver les enseignants avec des travaux incomplets
+    const incompleteTeachers = {};
+    const planData = planDocument.data;
+    
+    planData.forEach(item => {
+      const teacher = item[findKey(item, 'Enseignant')];
+      const taskVal = item[findKey(item, 'Travaux de classe')];
+      const className = item[findKey(item, 'Classe')];
+      
+      // Un enseignant est incomplet si au moins un "Travaux de classe" est vide
+      if (teacher && className && (taskVal == null || String(taskVal).trim() === '')) {
+        if (!incompleteTeachers[teacher]) {
+          incompleteTeachers[teacher] = new Set();
+        }
+        incompleteTeachers[teacher].add(className);
+      }
+    });
+
+    const teachersToNotify = Object.keys(incompleteTeachers);
+    console.log(`📊 [Test Reminders] ${teachersToNotify.length} enseignants incomplets:`, teachersToNotify);
+
+    if (teachersToNotify.length === 0) {
+      return res.status(200).json({ 
+        message: 'Tous les enseignants ont complété leurs plans.',
+        week: targetWeek
+      });
+    }
+
+    // Récupérer les abonnements push depuis MongoDB
+    const subscriptions = await db.collection('pushSubscriptions').find({}).toArray();
+    
+    let notificationsSent = 0;
+    const notificationResults = [];
+
+    // Envoyer des notifications à chaque enseignant incomplet
+    for (const teacher of teachersToNotify) {
+      const subscription = subscriptions.find(sub => sub.username === teacher);
+      
+      if (subscription && subscription.subscription) {
+        const classes = [...incompleteTeachers[teacher]].sort().join(', ');
+        const lang = getTeacherLanguage(teacher);
+        const msgs = notificationMessages[lang];
+        
+        // Message de rappel avec urgence
+        const message = {
+          title: msgs.reminderTitle,
+          body: msgs.reminderBody(teacher, targetWeek),
+          icon: 'https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299',
+          badge: 'https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299',
+          requireInteraction: true,
+          vibrate: [200, 100, 200, 100, 200],
+          tag: `plan-reminder-${targetWeek}-${Date.now()}`, // Tag unique pour chaque rappel
+          renotify: true, // Force la réaffichage même si tag similaire
+          data: {
+            url: 'https://plan-hebdomadaire-2026-boys.vercel.app',
+            week: targetWeek,
+            teacher: teacher,
+            classes: classes,
+            lang: lang,
+            playSound: true,
+            timestamp: new Date().toISOString()
+          }
+        };
+
+        try {
+          const payload = JSON.stringify(message);
+          await webpush.sendNotification(subscription.subscription, payload);
+          
+          notificationResults.push({
+            teacher: teacher,
+            classes: classes,
+            language: lang,
+            status: 'sent'
+          });
+          
+          notificationsSent++;
+          console.log(`✅ [Test Reminders] Notification envoyée à ${teacher} (${lang})`);
+        } catch (error) {
+          console.error(`❌ [Test Reminders] Erreur notification pour ${teacher}:`, error);
+          notificationResults.push({
+            teacher: teacher,
+            status: 'error',
+            error: error.message
+          });
+          
+          // Si l'abonnement est invalide (410 Gone), le supprimer
+          if (error.statusCode === 410) {
+            console.log(`🗑️ Suppression de l'abonnement invalide pour ${teacher}`);
+            await db.collection('pushSubscriptions').deleteOne({ username: teacher });
+          }
+        }
+      } else {
+        console.log(`ℹ️ [Test Reminders] ${teacher} n'a pas d'abonnement push`);
+        notificationResults.push({
+          teacher: teacher,
+          status: 'no_subscription'
+        });
+      }
+    }
+
+    res.status(200).json({
+      message: `Test de rappel forcé terminé pour la semaine ${targetWeek}.`,
+      week: targetWeek,
+      incompleteCount: teachersToNotify.length,
+      notificationsSent: notificationsSent,
+      results: notificationResults
+    });
+
+  } catch (error) {
+    console.error('❌ [Test Reminders] Erreur:', error);
+    res.status(500).json({ 
+      message: 'Erreur serveur.',
+      error: error.message 
+    });
   }
 });
 
