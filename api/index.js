@@ -1400,4 +1400,76 @@ app.post('/api/send-weekly-reminders', async (req, res) => {
   }
 });
 
+// ==================== ENDPOINT DE DIAGNOSTIC (DEBUG) ====================
+// Vérifier l'état des plans de leçon dans MongoDB
+app.get('/api/debug/lesson-plans/:week', async (req, res) => {
+  try {
+    const weekNumber = parseInt(req.params.week, 10);
+    if (isNaN(weekNumber)) {
+      return res.status(400).json({ message: 'Semaine invalide.' });
+    }
+    
+    const db = await connectToDatabase();
+    
+    // Récupérer tous les plans de leçon pour cette semaine
+    const lessonPlans = await db.collection('lessonPlans')
+      .find({ week: weekNumber })
+      .project({ _id: 1, enseignant: 1, classe: 1, matiere: 1, periode: 1, jour: 1, filename: 1, createdAt: 1 })
+      .toArray();
+    
+    // Récupérer les données du plan hebdomadaire
+    const planDocument = await db.collection('plans').findOne({ week: weekNumber });
+    const planRows = planDocument?.data || [];
+    
+    // Analyser les correspondances
+    const analysis = {
+      week: weekNumber,
+      lessonPlansCount: lessonPlans.length,
+      planRowsCount: planRows.length,
+      lessonPlans: lessonPlans,
+      samplePlanRows: planRows.slice(0, 5).map(row => {
+        const enseignant = row[findKey(row, 'Enseignant')] || '';
+        const classe = row[findKey(row, 'Classe')] || '';
+        const matiere = row[findKey(row, 'Matière')] || '';
+        const periode = row[findKey(row, 'Période')] || '';
+        let jour = row[findKey(row, 'Jour')] || '';
+        
+        // Extraire le nom du jour
+        const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'];
+        let jourOriginal = jour;
+        for (const dayName of dayNames) {
+          if (jour.includes(dayName)) {
+            jour = dayName;
+            break;
+          }
+        }
+        
+        const expectedId = `${weekNumber}_${enseignant}_${classe}_${matiere}_${periode}_${jour}`.replace(/\s+/g, '_');
+        const exists = lessonPlans.some(lp => lp._id === expectedId);
+        
+        return {
+          enseignant,
+          classe,
+          matiere,
+          periode,
+          jourOriginal,
+          jourExtrait: jour,
+          expectedId,
+          exists,
+          hasLessonPlanId: !!row.lessonPlanId
+        };
+      })
+    };
+    
+    res.status(200).json(analysis);
+    
+  } catch (error) {
+    console.error('❌ Erreur diagnostic:', error);
+    res.status(500).json({ 
+      message: 'Erreur serveur.',
+      error: error.message 
+    });
+  }
+});
+
 module.exports = app;

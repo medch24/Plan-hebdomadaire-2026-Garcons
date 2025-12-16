@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔧 Diagnostic Plans de Leçon</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        input[type="number"] {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        
+        button {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .results {
+            margin-top: 30px;
+        }
+        
+        .card {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+        }
+        
+        .card h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .stat {
+            display: inline-block;
+            padding: 8px 16px;
+            background: white;
+            border-radius: 20px;
+            margin: 5px;
+            font-weight: bold;
+        }
+        
+        .stat.success {
+            color: #28a745;
+            border: 2px solid #28a745;
+        }
+        
+        .stat.warning {
+            color: #ffc107;
+            border: 2px solid #ffc107;
+        }
+        
+        .stat.error {
+            color: #dc3545;
+            border: 2px solid #dc3545;
+        }
+        
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        
+        .lesson-plan-item {
+            background: white;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        
+        .lesson-plan-item .id {
+            font-family: 'Courier New', monospace;
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        .lesson-plan-item .info {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        
+        .row-sample {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .row-sample.match {
+            border-left-color: #28a745;
+        }
+        
+        .row-sample.no-match {
+            border-left-color: #dc3545;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        
+        .badge.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .badge.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+            font-size: 1.2em;
+        }
+        
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Diagnostic Plans de Leçon</h1>
+        <p class="subtitle">Vérifier l'état des plans de leçon dans MongoDB</p>
+        
+        <div class="input-group">
+            <input type="number" id="weekInput" placeholder="Numéro de semaine (ex: 16)" min="1" max="48" value="16">
+            <button onclick="runDiagnostic()">🔍 Lancer le diagnostic</button>
+        </div>
+        
+        <div id="results" class="results"></div>
+    </div>
+    
+    <script>
+        async function runDiagnostic() {
+            const week = document.getElementById('weekInput').value;
+            const resultsDiv = document.getElementById('results');
+            
+            if (!week || week < 1 || week > 48) {
+                resultsDiv.innerHTML = '<div class="error-message">❌ Veuillez entrer un numéro de semaine valide (1-48)</div>';
+                return;
+            }
+            
+            resultsDiv.innerHTML = '<div class="loading">⏳ Chargement des données...</div>';
+            
+            try {
+                const response = await fetch(`/api/debug/lesson-plans/${week}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Erreur ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                displayResults(data);
+                
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error-message">❌ Erreur: ${error.message}</div>`;
+            }
+        }
+        
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            
+            let html = '<div class="card">';
+            html += '<h3>📊 Statistiques Générales</h3>';
+            html += `<span class="stat ${data.lessonPlansCount > 0 ? 'success' : 'error'}">📦 ${data.lessonPlansCount} plans sauvegardés</span>`;
+            html += `<span class="stat ${data.planRowsCount > 0 ? 'success' : 'warning'}">📋 ${data.planRowsCount} lignes de plan</span>`;
+            
+            const matchRate = data.planRowsCount > 0 
+                ? Math.round((data.lessonPlansCount / data.planRowsCount) * 100) 
+                : 0;
+            html += `<span class="stat ${matchRate > 50 ? 'success' : 'warning'}">📈 ${matchRate}% de couverture</span>`;
+            html += '</div>';
+            
+            // Plans de leçon sauvegardés
+            if (data.lessonPlans && data.lessonPlans.length > 0) {
+                html += '<div class="card">';
+                html += '<h3>✅ Plans de Leçon Sauvegardés dans MongoDB</h3>';
+                
+                data.lessonPlans.forEach(plan => {
+                    html += '<div class="lesson-plan-item">';
+                    html += `<div class="id">📄 ${plan._id}</div>`;
+                    html += `<div class="info">`;
+                    html += `👤 ${plan.enseignant} | 📚 ${plan.classe} | 📖 ${plan.matiere} | ⏰ Période ${plan.periode} | 📅 ${plan.jour}`;
+                    if (plan.filename) {
+                        html += ` | 📁 ${plan.filename}`;
+                    }
+                    if (plan.createdAt) {
+                        html += ` | 🕐 ${new Date(plan.createdAt).toLocaleString('fr-FR')}`;
+                    }
+                    html += '</div></div>';
+                });
+                
+                html += '</div>';
+            } else {
+                html += '<div class="card">';
+                html += '<h3>⚠️ Aucun Plan Sauvegardé</h3>';
+                html += '<p>Aucun plan de leçon n\'a été généré pour cette semaine.</p>';
+                html += '<p><strong>Solution :</strong> Se connecter en tant que Mohamed (coordinateur) et générer les plans.</p>';
+                html += '</div>';
+            }
+            
+            // Échantillons de lignes de plan
+            if (data.samplePlanRows && data.samplePlanRows.length > 0) {
+                html += '<div class="card">';
+                html += '<h3>🔍 Échantillons de Lignes de Plan (5 premières)</h3>';
+                
+                data.samplePlanRows.forEach((row, index) => {
+                    const cssClass = row.exists ? 'match' : 'no-match';
+                    html += `<div class="row-sample ${cssClass}">`;
+                    html += `<strong>#${index + 1}</strong>`;
+                    html += `<span class="badge ${row.exists ? 'success' : 'error'}">${row.exists ? '✓ Plan trouvé' : '✗ Plan manquant'}</span>`;
+                    html += '<br>';
+                    html += `👤 ${row.enseignant} | 📚 ${row.classe} | 📖 ${row.matiere} | ⏰ P${row.periode} | 📅 ${row.jourExtrait}`;
+                    
+                    if (row.jourOriginal !== row.jourExtrait) {
+                        html += `<br><small style="color: #666;">Jour original: "${row.jourOriginal}" → Extrait: "${row.jourExtrait}"</small>`;
+                    }
+                    
+                    html += `<br><code style="font-size: 0.85em; color: #667eea;">ID attendu: ${row.expectedId}</code>`;
+                    html += '</div>';
+                });
+                
+                html += '</div>';
+            }
+            
+            // JSON brut
+            html += '<div class="card">';
+            html += '<h3>📄 Données JSON Brutes</h3>';
+            html += '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            html += '</div>';
+            
+            resultsDiv.innerHTML = html;
+        }
+        
+        // Lancer le diagnostic automatiquement au chargement
+        window.addEventListener('DOMContentLoaded', () => {
+            runDiagnostic();
+        });
+    </script>
+</body>
+</html>
