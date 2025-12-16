@@ -1438,11 +1438,11 @@ app.post('/api/send-weekly-reminders', async (req, res) => {
 
     console.log(`📅 [Weekly Reminders] Vérification: ${now.toISOString()} - Jour: ${dayOfWeek}, Heure: ${hourOfDay}`);
 
-    // ⚠️ IMPORTANT: N'envoyer des alertes QUE le LUNDI (jour 1)
-    // Le CRON doit tourner toutes les 3 heures uniquement le lundi
-    if (dayOfWeek !== 1) {
+    // ⚠️ IMPORTANT: N'envoyer des alertes QUE du LUNDI (1) au JEUDI (4)
+    // Le CRON doit tourner toutes les 3 heures pendant ces jours
+    if (dayOfWeek < 1 || dayOfWeek > 4) {
       return res.status(200).json({ 
-        message: 'Pas lundi aujourd\'hui. Aucune alerte envoyée.',
+        message: 'Alerte désactivée (hors période Lundi-Jeudi).',
         day: ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'][dayOfWeek],
         timestamp: now.toISOString()
       });
