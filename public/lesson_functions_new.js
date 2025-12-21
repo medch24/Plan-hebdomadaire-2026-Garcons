@@ -1,5 +1,28 @@
 // ==================== NOUVELLES FONCTIONS PLANS DE LEÇON (AVEC CHECKBOXES) ====================
 
+// Ouvrir la modal de génération de plans de leçon
+function openLessonPlanModal() {
+    const modal = document.getElementById('lessonPlanModal');
+    if (!modal) {
+        console.error('Modal lessonPlanModal non trouvée');
+        return;
+    }
+    
+    // Peupler les listes de classes et matières
+    populateLessonPlanClasses();
+    
+    // Afficher la modal
+    modal.style.display = 'block';
+}
+
+// Fermer la modal de génération de plans de leçon
+function closeLessonPlanModal() {
+    const modal = document.getElementById('lessonPlanModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
 // Fonction pour peupler les checkboxes des classes
 function populateLessonPlanClasses() {
     const container = document.getElementById('lessonPlanClassesList');
