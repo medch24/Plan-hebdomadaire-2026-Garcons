@@ -1897,6 +1897,117 @@ app.post('/api/send-weekly-reminders', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+// ============================================================================
+// NOUVELLE ROUTE: Notification en temps réel pour enseignants incomplets
+// ============================================================================
+app.post('/api/notify-incomplete-teachers', async (req, res) => {
+  try {
+    const { week, incompleteTeachers } = req.body;
+    
+    if (!week || !incompleteTeachers || typeof incompleteTeachers !== 'object') {
+      return res.status(400).json({ message: 'Paramètres invalides.' });
+    }
+
+    const db = await connectToDatabase();
+    const teachersToNotify = Object.keys(incompleteTeachers);
+    
+    if (teachersToNotify.length === 0) {
+      return res.status(200).json({ 
+        message: 'Aucun enseignant incomplet.',
+        notificationsSent: 0 
+      });
+    }
+
+    console.log(`🔔 Notification en temps réel pour ${teachersToNotify.length} enseignants incomplets`);
+
+    // Récupérer les abonnements push depuis MongoDB
+    const subscriptions = await db.collection('pushSubscriptions').find({}).toArray();
+    
+    let notificationsSent = 0;
+    const notificationResults = [];
+
+    // Envoyer des notifications à chaque enseignant incomplet
+    for (const teacher of teachersToNotify) {
+      const subscription = subscriptions.find(sub => sub.username === teacher);
+      
+      if (subscription && subscription.subscription) {
+        const classes = Array.isArray(incompleteTeachers[teacher]) 
+          ? incompleteTeachers[teacher].join(', ')
+          : incompleteTeachers[teacher];
+        
+        const lang = getTeacherLanguage(teacher);
+        const msgs = notificationMessages[lang];
+        
+        const message = {
+          title: msgs.title,
+          body: msgs.body(teacher, week, classes),
+          icon: 'https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299',
+          badge: 'https://cdn.glitch.global/1c613b14-019c-488a-a856-d55d64d174d0/al-kawthar-international-schools-jeddah-saudi-arabia-modified.png?v=1739565146299',
+          requireInteraction: true,
+          vibrate: [200, 100, 200, 100, 200],
+          tag: `plan-alert-${week}-${Date.now()}`,
+          data: {
+            url: 'https://plan-hebdomadaire-2026-boys.vercel.app',
+            week: week,
+            teacher: teacher,
+            classes: classes,
+            lang: lang,
+            playSound: true
+          }
+        };
+
+        try {
+          const payload = JSON.stringify(message);
+          await webpush.sendNotification(subscription.subscription, payload);
+          
+          notificationResults.push({
+            teacher: teacher,
+            classes: classes,
+            language: lang,
+            status: 'sent'
+          });
+          
+          notificationsSent++;
+          console.log(`✅ Notification envoyée à ${teacher} (${lang})`);
+        } catch (error) {
+          console.error(`❌ Erreur notification pour ${teacher}:`, error);
+          notificationResults.push({
+            teacher: teacher,
+            status: 'error',
+            error: error.message
+          });
+          
+          // Si l'abonnement est invalide, le supprimer
+          if (error.statusCode === 410) {
+            console.log(`🗑️ Suppression abonnement invalide pour ${teacher}`);
+            await db.collection('pushSubscriptions').deleteOne({ username: teacher });
+          }
+        }
+      } else {
+        console.log(`⚠️ Pas d'abonnement push pour ${teacher}`);
+        notificationResults.push({
+          teacher: teacher,
+          status: 'no_subscription'
+        });
+      }
+    }
+
+    res.status(200).json({
+      message: `Notifications envoyées: ${notificationsSent}/${teachersToNotify.length}`,
+      notificationsSent: notificationsSent,
+      totalIncomplete: teachersToNotify.length,
+      results: notificationResults
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur /notify-incomplete-teachers:', error);
+    res.status(500).json({ 
+      message: 'Erreur serveur.',
+      error: error.message 
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
