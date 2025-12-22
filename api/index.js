@@ -1364,11 +1364,6 @@ app.post('/api/generate-multiple-ai-lesson-plans', async (req, res) => {
           `${e.phase || ""} (${e.duree || ""}):\n${e.activite || ""}`
         ).join('\n\n');
 
-        const contenuString = Object.entries(jsonData)
-          .filter(([k]) => !['etapes', 'TitreUnite', 'Methodes', 'Outils', 'Objectifs', 'Ressources', 'Devoirs', 'DiffLents', 'DiffTresPerf', 'DiffTous'].includes(k))
-          .map(([k, v]) => `${k}: ${v}`)
-          .join('\n');
-
         const templateData = {
           TitreUnite: jsonData.TitreUnite || "",
           Methodes: jsonData.Methodes || "",
@@ -1386,7 +1381,8 @@ app.post('/api/generate-multiple-ai-lesson-plans', async (req, res) => {
           NomEnseignant: enseignant,
           Date: formattedDate,
           Deroulement: minutageString,
-          Contenu: contenuString,
+          Contenu: minutageString, // Le contenu est le déroulement des étapes
+          Minutage: minutageString, // Alias pour compatibilité
         };
 
         doc.render(templateData);
