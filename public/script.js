@@ -342,70 +342,58 @@
                 displayAlert("no_data_to_display_filters", true); 
                 return; 
             } 
-            const confirmation = confirm(t("Voulez-vous générer tous les plans de leçons IA pour les données affichées de la semaine " + currentWeek + " ? Cela peut prendre plusieurs minutes.")); 
+            const confirmation = confirm(t("Voulez-vous générer tous les plans de leçons IA pour les données affichées de la semaine " + currentWeek + " ? Cela peut prendre plusieurs minutes.\n\nTous les fichiers seront téléchargés automatiquement dans un seul fichier ZIP.")); 
             if (!confirmation) return; 
             
-            console.log("Generating All AI Lesson Plans for week:", currentWeek); 
-            displayAlert("generating_weekly_lessons", false); 
+            console.log("Generating All AI Lesson Plans in ZIP for week:", currentWeek); 
+            displayAlert("🤖 Génération de " + filteredAndSortedData.length + " plans de leçon IA en cours... Veuillez patienter.", false); 
             setButtonLoading("generateAllAIBtn", true, "fas fa-robot"); 
             showProgressBar(); 
-            updateProgressBar(0); 
-            
-            let successCount = 0;
-            let errorCount = 0;
-            const totalRows = filteredAndSortedData.length;
+            updateProgressBar(10); 
             
             try { 
-                for (let i = 0; i < totalRows; i++) {
-                    const rowData = filteredAndSortedData[i];
-                    const progress = Math.round(((i + 1) / totalRows) * 95);
-                    updateProgressBar(progress);
+                // Nouvelle méthode: appel unique pour tout générer en ZIP
+                const response = await fetch('/api/generate-multiple-ai-lesson-plans', { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ 
+                        week: currentWeek, 
+                        rowsData: filteredAndSortedData 
+                    }) 
+                });
+                
+                updateProgressBar(80);
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const contentDisposition = response.headers.get('content-disposition');
+                    let filename = `Plans_Lecon_IA_S${currentWeek}.zip`;
                     
-                    try {
-                        const response = await fetch('/api/generate-ai-lesson-plan', { 
-                            method: 'POST', 
-                            headers: { 'Content-Type': 'application/json' }, 
-                            body: JSON.stringify({ week: currentWeek, rowData: rowData }) 
-                        });
-                        
-                        if (response.ok) {
-                            const blob = await response.blob();
-                            const contentDisposition = response.headers.get('content-disposition');
-                            let filename = `plan_lecon_S${currentWeek}_${i + 1}.docx`;
-                            if (contentDisposition) {
-                                const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(;|$)/i);
-                                if (filenameMatch && filenameMatch[1]) {
-                                    filename = filenameMatch[1];
-                                }
-                            }
-                            saveAs(blob, filename);
-                            successCount++;
-                        } else {
-                            const errorResult = await response.json().catch(() => ({ message: "Erreur inconnue du serveur." }));
-                            console.error(`Erreur pour ligne ${i + 1}:`, errorResult.message);
-                            errorCount++;
+                    if (contentDisposition) {
+                        const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(;|$)/i);
+                        if (filenameMatch && filenameMatch[1]) {
+                            filename = filenameMatch[1];
                         }
-                    } catch (error) {
-                        console.error(`Erreur génération ligne ${i + 1}:`, error);
-                        errorCount++;
                     }
                     
-                    // Petit délai pour ne pas surcharger le serveur
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                }
-                
-                updateProgressBar(100);
-                
-                if (errorCount === 0) {
-                    displayAlert("weekly_lessons_generated", false);
-                } else if (successCount > 0) {
-                    displayAlert(t("generating_ai_lesson_plan") + ` - ${successCount} réussis, ${errorCount} échoués`, false);
+                    // Télécharger le ZIP automatiquement
+                    const link = document.createElement('a');
+                    link.href = window.URL.createObjectURL(blob);
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(link.href);
+                    
+                    updateProgressBar(100);
+                    displayAlert(`✅ ${filteredAndSortedData.length} plans de leçon IA générés et téléchargés automatiquement dans ${filename}!`, false, 7000);
                 } else {
-                    displayAlert("error_generating_ai_lesson_plan", true, { error: `Tous les plans ont échoué (${errorCount} erreurs)` });
+                    const errorResult = await response.json().catch(() => ({ message: "Erreur inconnue du serveur." }));
+                    throw new Error(errorResult.message || `Erreur serveur ${response.status}`);
                 }
             } catch (error) { 
                 console.error("Error generating all AI lesson plans:", error); 
-                displayAlert("error_generating_ai_lesson_plan", true, { error: error.message }); 
+                displayAlert("❌ Erreur lors de la génération des plans de leçon IA: " + error.message, true); 
                 updateProgressBar(0); 
             } finally { 
                 hideProgressBar(); 

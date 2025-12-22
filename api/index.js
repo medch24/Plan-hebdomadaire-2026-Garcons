@@ -1232,6 +1232,210 @@ app.post('/api/save-lesson-plan', async (req, res) => {
   }
 });
 
+// ============================================================================
+// NOUVELLE ROUTE: Génération multiple de plans de leçon IA en ZIP
+// ============================================================================
+app.post('/api/generate-multiple-ai-lesson-plans', async (req, res) => {
+  try {
+    console.log('📚 [Multiple AI Lesson Plans] Nouvelle demande de génération multiple');
+    
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) {
+      return res.status(503).json({ message: "Le service IA n'est pas initialisé." });
+    }
+
+    const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL || LESSON_TEMPLATE_URL;
+    if (!lessonTemplateUrl) {
+      return res.status(503).json({ message: "L'URL du modèle de leçon Word n'est pas configurée." });
+    }
+
+    const { week, rowsData } = req.body;
+    if (!Array.isArray(rowsData) || rowsData.length === 0 || !week) {
+      return res.status(400).json({ message: "Données invalides ou vides." });
+    }
+
+    console.log(`✅ [Multiple AI Lesson Plans] Génération de ${rowsData.length} plans pour semaine ${week}`);
+
+    // Charger le modèle Word une seule fois
+    let templateBuffer;
+    try {
+      const response = await fetch(lessonTemplateUrl);
+      if (!response.ok) throw new Error(`Échec téléchargement modèle (${response.status})`);
+      templateBuffer = Buffer.from(await response.arrayBuffer());
+    } catch (e) {
+      console.error("Erreur récupération modèle:", e);
+      return res.status(500).json({ message: "Impossible de récupérer le modèle de leçon." });
+    }
+
+    // Configuration du ZIP
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    const filename = `Plans_Lecon_IA_S${week}_${rowsData.length}_fichiers.zip`;
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    archive.pipe(res);
+
+    const weekNumber = Number(week);
+    const datesNode = specificWeekDateRangesNode[weekNumber];
+
+    // Résoudre le modèle Gemini une seule fois
+    const MODEL_NAME = await resolveGeminiModel(GEMINI_API_KEY);
+    console.log(`🤖 [Multiple AI] Modèle Gemini: ${MODEL_NAME}`);
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    // Générer chaque plan de leçon
+    for (let i = 0; i < rowsData.length; i++) {
+      const rowData = rowsData[i];
+      
+      try {
+        // Extraire données
+        const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
+        const classe = rowData[findKey(rowData, 'Classe')] || '';
+        const matiere = rowData[findKey(rowData, 'Matière')] || '';
+        const lecon = rowData[findKey(rowData, 'Leçon')] || '';
+        const jour = rowData[findKey(rowData, 'Jour')] || '';
+        const seance = rowData[findKey(rowData, 'Période')] || '';
+        const support = rowData[findKey(rowData, 'Support')] || 'Non spécifié';
+        const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
+        const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
+
+        console.log(`📝 [${i+1}/${rowsData.length}] ${enseignant} | ${classe} | ${matiere}`);
+
+        // Date formatée
+        let formattedDate = "";
+        if (jour && datesNode?.start) {
+          const weekStartDateNode = new Date(datesNode.start + 'T00:00:00Z');
+          if (!isNaN(weekStartDateNode.getTime())) {
+            const dayName = extractDayNameFromString(jour);
+            if (dayName) {
+              const dateOfDay = getDateForDayNameNode(weekStartDateNode, dayName);
+              if (dateOfDay) formattedDate = formatDateFrenchNode(dateOfDay);
+            }
+          }
+        }
+
+        // Prompt selon la langue de l'enseignant
+        const jsonStructure = `{"TitreUnite":"un titre d'unité pertinent pour la leçon","Methodes":"liste des méthodes d'enseignement","Outils":"liste des outils de travail","Objectifs":"une liste concise des objectifs d'apprentissage (compétences, connaissances), séparés par des sauts de ligne (\\\\n). Commence chaque objectif par un tiret (-).","etapes":[{"phase":"Introduction","duree":"5 min","activite":"Description de l'activité d'introduction pour l'enseignant et les élèves."},{"phase":"Activité Principale","duree":"25 min","activite":"Description de l'activité principale, en intégrant les 'travaux de classe' et le 'support' si possible."},{"phase":"Synthèse","duree":"10 min","activite":"Description de l'activité de conclusion et de vérification des acquis."},{"phase":"Clôture","duree":"5 min","activite":"Résumé rapide et annonce des devoirs."}],"Ressources":"les ressources spécifiques à utiliser.","Devoirs":"une suggestion de devoirs.","DiffLents":"une suggestion pour aider les apprenants en difficulté.","DiffTresPerf":"une suggestion pour stimuler les apprenants très performants.","DiffTous":"une suggestion de différenciation pour toute la classe."}`;
+
+        let prompt;
+        if (englishTeachers.includes(enseignant)) {
+          prompt = `Return ONLY valid JSON. No markdown, no code fences, no commentary.\n\nAs an expert pedagogical assistant, create a detailed 45-minute lesson plan in English. Structure the lesson into timed phases and integrate the teacher's existing notes:\n- Subject: ${matiere}, Class: ${classe}, Lesson Topic: ${lecon}\n- Planned Classwork: ${travaux}\n- Mentioned Support/Materials: ${support}\n- Planned Homework: ${devoirsPrevus}\n\nUse the following JSON structure with professional, concrete values in English (keys exactly as specified):\n${jsonStructure}`;
+        } else if (arabicTeachers.includes(enseignant)) {
+          prompt = `أعد فقط JSON صالحًا. بدون Markdown أو أسوار كود أو تعليقات.\n\nبصفتك مساعدًا تربويًا خبيرًا، أنشئ خطة درس مفصلة باللغة العربية مدتها 45 دقيقة. قم ببناء الدرس في مراحل محددة زمنياً وادمج ملاحظات المعلم:\n- المادة: ${matiere}، الفصل: ${classe}، الموضوع: ${lecon}\n- أعمال الصف المخطط لها: ${travaux}\n- الدعم/المواد: ${support}\n- الواجبات المخطط لها: ${devoirsPrevus}\n\nاستخدم البنية التالية بالقيم المهنية والملموسة (المفاتيح كما هي بالإنجليزية):\n${jsonStructure}`;
+        } else {
+          prompt = `Renvoie UNIQUEMENT du JSON valide. Pas de markdown, pas de blocs de code, pas de commentaire.\n\nEn tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure en phases chronométrées et intègre les notes de l'enseignant :\n- Matière : ${matiere}, Classe : ${classe}, Thème : ${lecon}\n- Travaux de classe : ${travaux}\n- Support/Matériel : ${support}\n- Devoirs prévus : ${devoirsPrevus}\n\nUtilise la structure JSON suivante (valeurs concrètes et professionnelles ; clés strictement identiques) :\n${jsonStructure}`;
+        }
+
+        // Appel API Gemini
+        const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+        const aiResponse = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }]
+          })
+        });
+
+        if (!aiResponse.ok) {
+          throw new Error(`API Gemini error: ${aiResponse.status}`);
+        }
+
+        const aiResult = await aiResponse.json();
+        const rawContent = aiResult?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        
+        // Parser JSON
+        let jsonData;
+        try {
+          const cleanedJson = rawContent.replace(/```json\n?|```\n?/g, '').trim();
+          jsonData = JSON.parse(cleanedJson);
+        } catch (parseError) {
+          console.error(`Erreur parsing JSON pour ${classe} ${matiere}:`, parseError);
+          throw new Error("Format JSON invalide de l'IA");
+        }
+
+        // Générer le document Word
+        const zip = new PizZip(templateBuffer);
+        const doc = new Docxtemplater(zip, { paragraphLoop: true, nullGetter: () => "" });
+
+        // Formatter les données pour le template
+        const minutageString = (jsonData.etapes || []).map(e =>
+          `${e.phase || ""} (${e.duree || ""}):\n${e.activite || ""}`
+        ).join('\n\n');
+
+        const contenuString = Object.entries(jsonData)
+          .filter(([k]) => !['etapes', 'TitreUnite', 'Methodes', 'Outils', 'Objectifs', 'Ressources', 'Devoirs', 'DiffLents', 'DiffTresPerf', 'DiffTous'].includes(k))
+          .map(([k, v]) => `${k}: ${v}`)
+          .join('\n');
+
+        const templateData = {
+          TitreUnite: jsonData.TitreUnite || "",
+          Methodes: jsonData.Methodes || "",
+          Outils: jsonData.Outils || "",
+          Objectifs: jsonData.Objectifs || "",
+          Ressources: jsonData.Ressources || "",
+          Devoirs: jsonData.Devoirs || "",
+          DiffLents: jsonData.DiffLents || "",
+          DiffTresPerf: jsonData.DiffTresPerf || "",
+          DiffTous: jsonData.DiffTous || "",
+          Classe: classe,
+          Matiere: matiere,
+          Lecon: lecon,
+          Seance: seance,
+          NomEnseignant: enseignant,
+          Date: formattedDate,
+          Deroulement: minutageString,
+          Contenu: contenuString,
+        };
+
+        doc.render(templateData);
+        const docBuffer = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+
+        // Nom de fichier unique
+        const sanitizeForFilename = (str) => {
+          if (typeof str !== 'string') str = String(str);
+          return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, '-')
+            .replace(/[^a-zA-Z0-9-]/g, '_')
+            .replace(/__+/g, '_');
+        };
+
+        const docFilename = `${i+1}-Plan_Lecon-${sanitizeForFilename(matiere)}-${sanitizeForFilename(classe)}-S${weekNumber}.docx`;
+        
+        // Ajouter au ZIP
+        archive.append(docBuffer, { name: docFilename });
+        successCount++;
+        
+        console.log(`✅ [${i+1}/${rowsData.length}] Généré: ${docFilename}`);
+
+        // Petit délai pour éviter de surcharger l'API
+        if (i < rowsData.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+      } catch (error) {
+        console.error(`❌ Erreur pour ligne ${i+1}:`, error.message);
+        errorCount++;
+        
+        // Ajouter un fichier texte d'erreur dans le ZIP
+        const errorFilename = `${i+1}-ERREUR-${rowData[findKey(rowData, 'Classe')] || 'Unknown'}.txt`;
+        archive.append(`Erreur de génération: ${error.message}`, { name: errorFilename });
+      }
+    }
+
+    console.log(`📊 [Multiple AI] Résultat: ${successCount} succès, ${errorCount} erreurs`);
+    
+    archive.finalize();
+
+  } catch (error) {
+    console.error('❌ Erreur serveur /generate-multiple-ai-lesson-plans:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ message: `Erreur interne: ${error.message}` });
+    }
+  }
+});
+
 // Télécharger un plan de leçon depuis MongoDB
 app.get('/api/download-lesson-plan/:lessonPlanId', async (req, res) => {
   try {
