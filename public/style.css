@@ -416,11 +416,14 @@ body::before {
     vertical-align: top;
 }
 
-/* Colonnes fixes - largeur réduite */
+/* Colonnes fixes - largeur réduite avec maximum */
 #planTable th:not(.editable),
 #planTable td:not(.editable) {
     white-space: nowrap;
     width: 1%;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Colonnes éditables - largeur flexible */
