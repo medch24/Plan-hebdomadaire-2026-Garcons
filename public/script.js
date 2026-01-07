@@ -732,4 +732,86 @@
             }
         }
         
+        // ==================== REMPLISSAGE AUTOMATIQUE DEPUIS DISTRIBUTION ANNUELLE ====================
+        
+        async function autoFillFromDistribution() {
+            const weekSelect = document.getElementById('weekSelector');
+            const selectedWeek = weekSelect.value;
+            const statusSpan = document.getElementById('auto-fill-status');
+            const btn = document.getElementById('autoFillBtn');
+            
+            if (!selectedWeek) {
+                displayAlert("please_select_week", true);
+                return;
+            }
+            
+            // Confirmer avec l'utilisateur
+            const confirmMsg = `Voulez-vous remplir automatiquement les contenus depuis la distribution annuelle pour la semaine ${selectedWeek} ?\n\n⚠️ Cette opération va copier les contenus des leçons et devoirs depuis la base de distribution. Les données existantes seront écrasées.`;
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+            
+            console.log(`[Auto-Fill] Remplissage automatique pour S${selectedWeek}...`);
+            displayAlert('', false);
+            statusSpan.textContent = '🔄 Remplissage en cours...';
+            setButtonLoading('autoFillBtn', true, 'fas fa-magic');
+            showProgressBar();
+            updateProgressBar(10);
+            
+            try {
+                const response = await fetch('/api/auto-fill-from-distribution', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ week: selectedWeek })
+                });
+                
+                updateProgressBar(80);
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.message || `Erreur serveur ${response.status}`);
+                }
+                
+                updateProgressBar(100);
+                
+                const successMsg = `✅ Remplissage automatique terminé pour la semaine ${selectedWeek}!\n` +
+                                  `📊 ${result.updatedCount} ligne(s) mise(s) à jour sur ${result.totalProcessed} traitée(s).`;
+                
+                displayAlert(successMsg, false);
+                statusSpan.textContent = `✅ ${result.updatedCount} ligne(s) mise(s) à jour`;
+                statusSpan.style.color = '#28a745';
+                
+                // Recharger les données si c'est la semaine courante
+                if (selectedWeek === currentWeek) {
+                    console.log("[Auto-Fill] Rechargement des données...");
+                    await loadPlanForWeek();
+                }
+                
+                // Afficher les erreurs s'il y en a
+                if (result.errors && result.errors.length > 0) {
+                    console.warn("[Auto-Fill] Erreurs:", result.errors);
+                    const errorMsg = result.errors.map(e => `${e.classe}: ${e.error}`).join('\n');
+                    setTimeout(() => {
+                        alert(`⚠️ Certaines classes n'ont pas pu être traitées:\n\n${errorMsg}`);
+                    }, 1000);
+                }
+                
+            } catch (error) {
+                console.error("Erreur remplissage automatique:", error);
+                displayAlert(`❌ Erreur lors du remplissage automatique: ${error.message}`, true);
+                statusSpan.textContent = `❌ Erreur: ${error.message}`;
+                statusSpan.style.color = '#dc3545';
+                updateProgressBar(0);
+            } finally {
+                hideProgressBar();
+                setButtonLoading('autoFillBtn', false, 'fas fa-magic');
+                setTimeout(() => {
+                    if (statusSpan.textContent.includes('✅') || statusSpan.textContent.includes('❌')) {
+                        statusSpan.textContent = '';
+                        statusSpan.style.color = '';
+                    }
+                }, 8000);
+            }
+        }
+        
         console.log("Script principal terminé.");

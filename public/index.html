@@ -124,6 +124,18 @@
                     <i class="fas fa-file-invoice"></i> <span class="btn-text">Générer Rapport Complet par Classe</span>
                 </button>
              </div>
+             <div class="admin-subsection" style="border-top: 2px solid var(--border-color); margin-top: 15px; padding-top: 15px;">
+                <h4 style="color: #0066CC; margin-bottom: 10px;">
+                    <i class="fas fa-magic"></i> Remplissage Automatique
+                </h4>
+                <p style="font-size: 0.9em; color: var(--muted-text-color); margin-bottom: 10px;">
+                    <i class="fas fa-info-circle"></i> Cette fonction copie automatiquement les contenus depuis la base de données de distribution annuelle pour la semaine sélectionnée.
+                </p>
+                <button id="autoFillBtn" onclick="autoFillFromDistribution()" class="pro-button accent-button" style="width: 100%; padding: 12px;">
+                    <i class="fas fa-magic"></i> <span class="btn-text">Remplir automatiquement depuis Distribution Annuelle</span>
+                </button>
+                <span id="auto-fill-status" style="font-size: 0.9em; display: block; margin-top: 10px;"></span>
+             </div>
              <div style="width: 100%; margin-top: 10px; font-size: 0.85em; color: var(--muted-text-color); border-top: 1px dashed var(--border-color); padding-top: 10px;">
                  <i class="fas fa-info-circle"></i> **Note:** La fonction d'upload et d'extraction automatique depuis des fichiers Word ou PDF n'est pas implémentée dans cette version. Veuillez utiliser le format Excel pour charger les données via le bouton ci-dessus.
              </div>

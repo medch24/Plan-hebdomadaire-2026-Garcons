@@ -2207,6 +2207,273 @@ app.post('/api/notify-incomplete-teachers', async (req, res) => {
   }
 });
 
+// ============================================================================
+// NOUVELLE ROUTE: Remplissage automatique depuis la distribution annuelle
+// ============================================================================
+app.post('/api/auto-fill-from-distribution', async (req, res) => {
+  const DISTRIBUTION_MONGO_URL = 'mongodb+srv://mohamedsherif:Mmedch86@distribution-annuel-202.rq80vms.mongodb.net/?retryWrites=true&w=majority&appName=Distribution-annuel-2026';
+  
+  try {
+    const { week } = req.body;
+    
+    if (!week || isNaN(parseInt(week))) {
+      return res.status(400).json({ message: 'Numéro de semaine requis.' });
+    }
+    
+    const weekNumber = parseInt(week, 10);
+    console.log(`🔄 Remplissage automatique pour la semaine ${weekNumber}...`);
+    
+    // Connexion à la base de données principale (plans hebdomadaires)
+    const mainDb = await connectToDatabase();
+    const planDocument = await mainDb.collection('plans').findOne({ week: weekNumber });
+    
+    if (!planDocument || !planDocument.data || planDocument.data.length === 0) {
+      return res.status(404).json({ 
+        message: `Aucun plan existant trouvé pour la semaine ${weekNumber}. Veuillez d'abord charger les données via Excel.` 
+      });
+    }
+    
+    // Connexion à la base de données de distribution annuelle
+    const distributionClient = new MongoClient(DISTRIBUTION_MONGO_URL);
+    await distributionClient.connect();
+    console.log('✅ Connecté à la base de distribution annuelle');
+    
+    // Fonction pour normaliser les noms de matières
+    const normalizeMatiere = (matiere) => {
+      if (!matiere || typeof matiere !== 'string') return '';
+      const normalized = matiere.toLowerCase().trim()
+        .replace(/\s+/g, ' ')
+        .replace(/[.,]/g, '');
+      return normalized;
+    };
+    
+    // Mapping des variations de noms de matières
+    const matiereVariations = {
+      'langue et litterature': ['langue et litterature', 'langue et litt', 'll', 'l l', 'langue', 'litterature'],
+      'mathematiques': ['mathematiques', 'maths', 'math', 'mathématiques'],
+      'sciences': ['sciences', 'science', 'sc'],
+      'education islamique': ['education islamique', 'ed islamique', 'islamique', 'islam'],
+      'arabe': ['arabe', 'ar', 'langue arabe'],
+      'anglais': ['anglais', 'english', 'eng', 'an'],
+      'francais': ['francais', 'français', 'fr', 'langue française'],
+      'histoire': ['histoire', 'hist', 'h'],
+      'geographie': ['geographie', 'géographie', 'geo', 'g'],
+      'education physique': ['education physique', 'ed physique', 'eps', 'sport'],
+      'arts': ['arts', 'art', 'dessin'],
+      'musique': ['musique', 'music']
+    };
+    
+    // Fonction pour trouver la matière canonique
+    const findCanonicalMatiere = (matiere) => {
+      const normalized = normalizeMatiere(matiere);
+      for (const [canonical, variations] of Object.entries(matiereVariations)) {
+        if (variations.includes(normalized)) {
+          return canonical;
+        }
+      }
+      return normalized;
+    };
+    
+    // Fonction pour vérifier si deux matières correspondent
+    const matiereMatches = (matiere1, matiere2) => {
+      const canon1 = findCanonicalMatiere(matiere1);
+      const canon2 = findCanonicalMatiere(matiere2);
+      return canon1 === canon2;
+    };
+    
+    // Mapping des noms de classes entre le plan et la base de distribution
+    const classMapping = {
+      'PEI1 G': 'Classe_PEI1_G',
+      'PEI2 G': 'Classe_PEI2_G',
+      'PEI3 G': 'Classe_PEI3_G',
+      'PEI4 G': 'Classe_PEI4_G',
+      'PEI5 G': 'Classe_PEI5_G',
+      'DP1': 'Classe_DP1',
+      'DP2': 'Classe_DP2',
+      'DP2 G': 'Classe_DP2_G',
+      'PP1': 'Classe_PP1',
+      'PP2': 'Classe_PP2',
+      'PP3': 'Classe_PP3',
+      'PP4': 'Classe_PP4',
+      'PP5': 'Classe_PP5',
+      'GS': 'Classe_GS',
+      'MS': 'Classe_MS'
+    };
+    
+    let updatedCount = 0;
+    let totalProcessed = 0;
+    const errors = [];
+    
+    // Grouper les données par classe
+    const dataByClass = {};
+    for (const row of planDocument.data) {
+      const classeKey = findKey(row, 'Classe');
+      const classe = classeKey ? row[classeKey] : null;
+      if (classe) {
+        if (!dataByClass[classe]) {
+          dataByClass[classe] = [];
+        }
+        dataByClass[classe].push(row);
+      }
+    }
+    
+    console.log(`📊 Classes à traiter: ${Object.keys(dataByClass).length}`);
+    
+    // Traiter chaque classe
+    for (const [classe, rows] of Object.entries(dataByClass)) {
+      const dbName = classMapping[classe];
+      
+      if (!dbName) {
+        console.log(`⚠️ Classe ${classe} non mappée`);
+        continue;
+      }
+      
+      try {
+        const classDb = distributionClient.db(dbName);
+        const tablesCollection = classDb.collection('tables');
+        
+        // Récupérer toutes les tables (matières) de cette classe
+        const tables = await tablesCollection.find({}).toArray();
+        console.log(`📚 Classe ${classe}: ${tables.length} matières trouvées`);
+        
+        // Traiter chaque ligne du plan pour cette classe
+        for (const row of rows) {
+          totalProcessed++;
+          
+          const enseignantKey = findKey(row, 'Enseignant');
+          const matiereKey = findKey(row, 'Matière');
+          const jourKey = findKey(row, 'Jour');
+          const leconKey = findKey(row, 'Leçon');
+          const travauxKey = findKey(row, 'Travaux');
+          const periodeKey = findKey(row, 'Période');
+          
+          const matiere = matiereKey ? row[matiereKey] : null;
+          const jour = jourKey ? row[jourKey] : null;
+          
+          if (!matiere || !jour) {
+            continue;
+          }
+          
+          // Extraire seulement le nom du jour (sans la date)
+          const jourName = extractDayNameFromString(jour);
+          if (!jourName) {
+            continue;
+          }
+          
+          // Chercher la table correspondante dans la distribution
+          let matchingTable = null;
+          for (const table of tables) {
+            if (table.matiere && matiereMatches(table.matiere, matiere)) {
+              matchingTable = table;
+              break;
+            }
+          }
+          
+          if (!matchingTable || !matchingTable.data || !Array.isArray(matchingTable.data)) {
+            continue;
+          }
+          
+          // Chercher la ligne correspondante dans la distribution
+          // Format: [["Mois", "Semaine", "Date", "Jour", "Unité/Chapitre", "Contenu de la leçon", ...], ...]
+          const headerRow = matchingTable.data[0];
+          const semaineIndex = headerRow ? headerRow.findIndex(h => h && h.toLowerCase().includes('semaine')) : -1;
+          const jourIndex = headerRow ? headerRow.findIndex(h => h && h.toLowerCase().includes('jour')) : -1;
+          const contenuIndex = headerRow ? headerRow.findIndex(h => h && h.toLowerCase().includes('contenu')) : -1;
+          const uniteIndex = headerRow ? headerRow.findIndex(h => h && (h.toLowerCase().includes('unité') || h.toLowerCase().includes('chapitre'))) : -1;
+          const devoirIndex = headerRow ? headerRow.findIndex(h => h && h.toLowerCase().includes('devoir')) : -1;
+          
+          if (semaineIndex === -1 || jourIndex === -1) {
+            continue;
+          }
+          
+          // Chercher la ligne avec la bonne semaine et le bon jour
+          let matchingRow = null;
+          const semainePattern = `Semaine ${weekNumber}`;
+          
+          for (let i = 1; i < matchingTable.data.length; i++) {
+            const dataRow = matchingTable.data[i];
+            const rowSemaine = dataRow[semaineIndex];
+            const rowJour = dataRow[jourIndex];
+            
+            if (rowSemaine && rowSemaine.includes(semainePattern) && rowJour && rowJour === jourName) {
+              matchingRow = dataRow;
+              break;
+            }
+          }
+          
+          if (matchingRow) {
+            // Remplir les données
+            let updated = false;
+            
+            // Contenu de la leçon
+            if (contenuIndex !== -1 && matchingRow[contenuIndex]) {
+              const contenu = matchingRow[contenuIndex].trim();
+              if (contenu && leconKey) {
+                row[leconKey] = contenu;
+                updated = true;
+              }
+            }
+            
+            // Unité/Chapitre (ajouté avant le contenu)
+            if (uniteIndex !== -1 && matchingRow[uniteIndex]) {
+              const unite = matchingRow[uniteIndex].trim();
+              if (unite && leconKey) {
+                const currentLecon = row[leconKey] || '';
+                row[leconKey] = unite + (currentLecon ? '\n' + currentLecon : '');
+                updated = true;
+              }
+            }
+            
+            // Devoir/Travaux
+            if (devoirIndex !== -1 && matchingRow[devoirIndex]) {
+              const devoir = matchingRow[devoirIndex].trim();
+              if (devoir && travauxKey) {
+                row[travauxKey] = devoir;
+                updated = true;
+              }
+            }
+            
+            if (updated) {
+              updatedCount++;
+              console.log(`✅ Mis à jour: ${classe} - ${matiere} - ${jourName}`);
+            }
+          }
+        }
+      } catch (classError) {
+        console.error(`❌ Erreur classe ${classe}:`, classError.message);
+        errors.push({ classe, error: classError.message });
+      }
+    }
+    
+    // Sauvegarder les modifications
+    if (updatedCount > 0) {
+      await mainDb.collection('plans').updateOne(
+        { week: weekNumber },
+        { $set: { data: planDocument.data } }
+      );
+      console.log(`💾 ${updatedCount} lignes mises à jour et sauvegardées`);
+    }
+    
+    await distributionClient.close();
+    
+    res.status(200).json({
+      success: true,
+      message: `Remplissage automatique terminé pour la semaine ${weekNumber}`,
+      updatedCount,
+      totalProcessed,
+      errors: errors.length > 0 ? errors : undefined
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur /auto-fill-from-distribution:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors du remplissage automatique.',
+      error: error.message
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
