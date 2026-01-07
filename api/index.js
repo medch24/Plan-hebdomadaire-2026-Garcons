@@ -2344,32 +2344,44 @@ app.post('/api/auto-fill-from-distribution', async (req, res) => {
           const matiereKey = findKey(row, 'Matière');
           const jourKey = findKey(row, 'Jour');
           const leconKey = findKey(row, 'Leçon');
-          const travauxKey = findKey(row, 'Travaux');
+          // Chercher "Travaux de classe" ou "Travaux"
+          const travauxKey = findKey(row, 'Travaux de classe') || findKey(row, 'Travaux');
           const periodeKey = findKey(row, 'Période');
           
           const matiere = matiereKey ? row[matiereKey] : null;
           const jour = jourKey ? row[jourKey] : null;
           
+          console.log(`🔍 Traitement: ${classe} - ${matiere} - ${jour}`);
+          
           if (!matiere || !jour) {
+            console.log(`⚠️ Matière ou jour manquant pour ${classe}`);
             continue;
           }
           
           // Extraire seulement le nom du jour (sans la date)
           const jourName = extractDayNameFromString(jour);
           if (!jourName) {
+            console.log(`⚠️ Impossible d'extraire le nom du jour de: ${jour}`);
             continue;
           }
+          
+          console.log(`🔎 Recherche: ${classe} - ${matiere} - ${jourName}`);
           
           // Chercher la table correspondante dans la distribution
           let matchingTable = null;
           for (const table of tables) {
             if (table.matiere && matiereMatches(table.matiere, matiere)) {
               matchingTable = table;
+              console.log(`✓ Table trouvée: ${table.matiere} ≈ ${matiere}`);
               break;
             }
           }
           
           if (!matchingTable || !matchingTable.data || !Array.isArray(matchingTable.data)) {
+            console.log(`❌ Pas de table pour: ${matiere} (dans ${classe})`);
+            if (!matchingTable) {
+              console.log(`   Matières disponibles:`, tables.map(t => t.matiere).join(', '));
+            }
             continue;
           }
           
@@ -2390,6 +2402,8 @@ app.post('/api/auto-fill-from-distribution', async (req, res) => {
           let matchingRow = null;
           const semainePattern = `Semaine ${weekNumber}`;
           
+          console.log(`🔍 Recherche dans la table: Semaine=${semainePattern}, Jour=${jourName}`);
+          
           for (let i = 1; i < matchingTable.data.length; i++) {
             const dataRow = matchingTable.data[i];
             const rowSemaine = dataRow[semaineIndex];
@@ -2397,46 +2411,59 @@ app.post('/api/auto-fill-from-distribution', async (req, res) => {
             
             if (rowSemaine && rowSemaine.includes(semainePattern) && rowJour && rowJour === jourName) {
               matchingRow = dataRow;
+              console.log(`✓ Ligne trouvée à l'index ${i}: Semaine=${rowSemaine}, Jour=${rowJour}`);
               break;
             }
           }
           
-          if (matchingRow) {
-            // Remplir les données
-            let updated = false;
-            
-            // Contenu de la leçon
-            if (contenuIndex !== -1 && matchingRow[contenuIndex]) {
-              const contenu = matchingRow[contenuIndex].trim();
-              if (contenu && leconKey) {
-                row[leconKey] = contenu;
-                updated = true;
-              }
+          if (!matchingRow) {
+            console.log(`❌ Aucune ligne trouvée pour Semaine ${weekNumber} - ${jourName}`);
+            console.log(`   Indices: semaine=${semaineIndex}, jour=${jourIndex}, contenu=${contenuIndex}, devoir=${devoirIndex}`);
+            continue;
+          }
+          
+          // Remplir les données
+          let updated = false;
+          
+          console.log(`📝 Remplissage pour ${classe} - ${matiere} - ${jourName}`);
+          console.log(`   Clés: leconKey=${leconKey}, travauxKey=${travauxKey}`);
+          
+          // Contenu de la leçon
+          if (contenuIndex !== -1 && matchingRow[contenuIndex]) {
+            const contenu = matchingRow[contenuIndex].trim();
+            if (contenu && leconKey) {
+              console.log(`   ✓ Contenu trouvé: "${contenu.substring(0, 50)}..."`);
+              row[leconKey] = contenu;
+              updated = true;
             }
-            
-            // Unité/Chapitre (ajouté avant le contenu)
-            if (uniteIndex !== -1 && matchingRow[uniteIndex]) {
-              const unite = matchingRow[uniteIndex].trim();
-              if (unite && leconKey) {
-                const currentLecon = row[leconKey] || '';
-                row[leconKey] = unite + (currentLecon ? '\n' + currentLecon : '');
-                updated = true;
-              }
+          }
+          
+          // Unité/Chapitre (ajouté avant le contenu)
+          if (uniteIndex !== -1 && matchingRow[uniteIndex]) {
+            const unite = matchingRow[uniteIndex].trim();
+            if (unite && leconKey) {
+              console.log(`   ✓ Unité trouvée: "${unite}"`);
+              const currentLecon = row[leconKey] || '';
+              row[leconKey] = unite + (currentLecon ? '\n' + currentLecon : '');
+              updated = true;
             }
-            
-            // Devoir/Travaux
-            if (devoirIndex !== -1 && matchingRow[devoirIndex]) {
-              const devoir = matchingRow[devoirIndex].trim();
-              if (devoir && travauxKey) {
-                row[travauxKey] = devoir;
-                updated = true;
-              }
+          }
+          
+          // Devoir/Travaux
+          if (devoirIndex !== -1 && matchingRow[devoirIndex]) {
+            const devoir = matchingRow[devoirIndex].trim();
+            if (devoir && travauxKey) {
+              console.log(`   ✓ Devoir trouvé: "${devoir.substring(0, 50)}..."`);
+              row[travauxKey] = devoir;
+              updated = true;
             }
-            
-            if (updated) {
-              updatedCount++;
-              console.log(`✅ Mis à jour: ${classe} - ${matiere} - ${jourName}`);
-            }
+          }
+          
+          if (updated) {
+            updatedCount++;
+            console.log(`✅ Mis à jour: ${classe} - ${matiere} - ${jourName}`);
+          } else {
+            console.log(`⚠️ Aucune mise à jour pour: ${classe} - ${matiere} - ${jourName}`);
           }
         }
       } catch (classError) {
