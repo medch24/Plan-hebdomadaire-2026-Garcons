@@ -157,6 +157,16 @@ function getDateForDayNameNode(weekStartDate, dayName) {
 }
 const findKey = (obj, target) => obj ? Object.keys(obj).find(k => k.trim().toLowerCase() === target.toLowerCase()) : undefined;
 
+// ======================= Fonction utilitaire pour les noms de fichiers ==
+const sanitizeForFilename = (str) => {
+  if (typeof str !== 'string') str = String(str);
+  const normalized = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return normalized
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9-]/g, '_')
+    .replace(/__+/g, '_');
+};
+
 // ======================= Sélection dynamique du modèle ==================
 
 /**
@@ -966,11 +976,18 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
   try {
     console.log('📝 [AI Lesson Plan] Nouvelle demande de génération');
     
+    // Support GROQ API (prioritaire) avec fallback vers GEMINI
+    const GROQ_API_KEY = process.env.GROQ_API_KEY;
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY) {
-      console.error('❌ [AI Lesson Plan] Clé API GEMINI manquante');
-      return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez la clé API GEMINI du serveur." });
+    const USE_GROQ = GROQ_API_KEY ? true : false;
+    
+    if (!GROQ_API_KEY && !GEMINI_API_KEY) {
+      console.error('❌ [AI Lesson Plan] Aucune clé API (GROQ ou GEMINI) disponible');
+      return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez les clés API GROQ ou GEMINI du serveur." });
     }
+    
+    console.log(`🔧 [AI Lesson Plan] Provider IA: ${USE_GROQ ? 'GROQ (llama-3.3-70b)' : 'GEMINI'}`);
+    const AI_API_KEY = USE_GROQ ? GROQ_API_KEY : GEMINI_API_KEY;
 
     const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL || LESSON_TEMPLATE_URL;
     if (!lessonTemplateUrl) {
@@ -1065,52 +1082,84 @@ Utilise la structure JSON suivante (valeurs concrètes et professionnelles ; cl�
 ${jsonStructure}`;
     }
 
-    // === Résolution dynamique du modèle compatible v1 ===
-    console.log('🤖 [AI Lesson Plan] Résolution du modèle Gemini...');
-    const MODEL_NAME = await resolveGeminiModel(GEMINI_API_KEY);
-    console.log(`🤖 [AI Lesson Plan] Modèle sélectionné: ${MODEL_NAME}`);
+    // === Configuration de l'API selon le provider ===
+    let API_URL, requestBody, aiResponse;
     
-    const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
-
-    const requestBody = {
-      contents: [
-        { role: "user", parts: [{ text: prompt }] }
-      ]
-      // Pas de generationConfig pour éviter les 400 sur certains déploiements
-    };
-
-    console.log('🔄 [AI Lesson Plan] Appel à l\'API Gemini...');
-    const aiResponse = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
+    if (USE_GROQ) {
+      // GROQ API (quota plus généreux)
+      console.log('🤖 [AI Lesson Plan] Utilisation de GROQ API avec llama-3.3-70b-versatile');
+      API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+      requestBody = {
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 2048
+      };
+      
+      console.log('🔄 [AI Lesson Plan] Appel à l\'API GROQ...');
+      aiResponse = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROQ_API_KEY}`
+        },
+        body: JSON.stringify(requestBody),
+      });
+    } else {
+      // GEMINI API (fallback)
+      console.log('🤖 [AI Lesson Plan] Résolution du modèle Gemini...');
+      const MODEL_NAME = await resolveGeminiModel(GEMINI_API_KEY);
+      console.log(`🤖 [AI Lesson Plan] Modèle sélectionné: ${MODEL_NAME}`);
+      
+      API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+      requestBody = {
+        contents: [
+          { role: "user", parts: [{ text: prompt }] }
+        ]
+      };
+      
+      console.log('🔄 [AI Lesson Plan] Appel à l\'API Gemini...');
+      aiResponse = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+    }
 
     if (!aiResponse.ok) {
       const errorBody = await aiResponse.json().catch(() => ({}));
-      console.error("❌ [AI Lesson Plan] Erreur de l'API Google AI:", JSON.stringify(errorBody, null, 2));
+      console.error(`❌ [AI Lesson Plan] Erreur de l'API ${USE_GROQ ? 'GROQ' : 'GEMINI'}:`, JSON.stringify(errorBody, null, 2));
       
       // Message spécifique pour quota dépassé
       if (aiResponse.status === 429) {
-        throw new Error(`⚠️ QUOTA API GEMINI DÉPASSÉ : Limite gratuite atteinte (20 requêtes/jour). Veuillez réessayer demain ou upgrader votre compte Google AI. Détails : ${errorBody.error?.message || 'Quota dépassé'}`);
+        const provider = USE_GROQ ? 'GROQ' : 'GEMINI';
+        throw new Error(`⚠️ QUOTA API ${provider} DÉPASSÉ : Limite gratuite atteinte. Veuillez réessayer plus tard. Détails : ${errorBody.error?.message || 'Quota dépassé'}`);
       }
       
       throw new Error(`[${aiResponse.status} ${aiResponse.statusText}] ${errorBody.error?.message || "Erreur inconnue de l'API."}`);
     }
     
-    console.log('✅ [AI Lesson Plan] Réponse reçue de Gemini');
+    console.log(`✅ [AI Lesson Plan] Réponse reçue de ${USE_GROQ ? 'GROQ' : 'GEMINI'}`);
 
     const aiResult = await aiResponse.json();
 
     // Extraction robuste du texte JSON renvoyé
     let text = "";
     try {
-      text = aiResult?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (!text && Array.isArray(aiResult?.candidates?.[0]?.content?.parts)) {
-        text = aiResult.candidates[0].content.parts.map(p => p.text || "").join("").trim();
-      }
-      if (!text && aiResult?.candidates?.[0]?.output_text) {
-        text = String(aiResult.candidates[0].output_text).trim();
+      if (USE_GROQ) {
+        // Format GROQ (OpenAI-compatible)
+        text = aiResult?.choices?.[0]?.message?.content?.trim();
+      } else {
+        // Format GEMINI
+        text = aiResult?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (!text && Array.isArray(aiResult?.candidates?.[0]?.content?.parts)) {
+          text = aiResult.candidates[0].content.parts.map(p => p.text || "").join("").trim();
+        }
+        if (!text && aiResult?.candidates?.[0]?.output_text) {
+          text = String(aiResult.candidates[0].output_text).trim();
+        }
       }
     } catch (_) {}
 
@@ -1156,16 +1205,8 @@ ${jsonStructure}`;
     doc.render(templateData);
     const buf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
 
-    const sanitizeForFilename = (str) => {
-      if (typeof str !== 'string') str = String(str);
-      const normalized = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      return normalized
-        .replace(/\s+/g, '-')
-        .replace(/[^a-zA-Z0-9-]/g, '_')
-        .replace(/__+/g, '_');
-    };
-
-    const filename = `Plan de lecon-${sanitizeForFilename(matiere)}-${sanitizeForFilename(seance)}-${sanitizeForFilename(classe)}-Semaine${weekNumber}.docx`;
+    // Format: Matière_Classe_Semaine_Séance_Enseignant.docx
+    const filename = `${sanitizeForFilename(matiere)}_${sanitizeForFilename(classe)}_S${weekNumber}_P${sanitizeForFilename(seance)}_${sanitizeForFilename(enseignant)}.docx`;
     console.log(`📄 [AI Lesson Plan] Envoi du fichier: ${filename}`);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
@@ -1238,10 +1279,16 @@ app.post('/api/generate-multiple-ai-lesson-plans', async (req, res) => {
   try {
     console.log('📚 [Multiple AI Lesson Plans] Nouvelle demande de génération multiple');
     
+    // Support GROQ API (prioritaire) avec fallback vers GEMINI
+    const GROQ_API_KEY = process.env.GROQ_API_KEY;
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY) {
-      return res.status(503).json({ message: "Le service IA n'est pas initialisé." });
+    const USE_GROQ = GROQ_API_KEY ? true : false;
+    
+    if (!GROQ_API_KEY && !GEMINI_API_KEY) {
+      return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez les clés API GROQ ou GEMINI." });
     }
+    
+    console.log(`🔧 [Multiple AI] Provider IA: ${USE_GROQ ? 'GROQ (llama-3.3-70b)' : 'GEMINI'}`);
 
     const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL || LESSON_TEMPLATE_URL;
     if (!lessonTemplateUrl) {
@@ -1254,6 +1301,34 @@ app.post('/api/generate-multiple-ai-lesson-plans', async (req, res) => {
     }
 
     console.log(`✅ [Multiple AI Lesson Plans] Génération de ${rowsData.length} plans pour semaine ${week}`);
+
+    // ⚡ FILTRER LES LIGNES AVEC LEÇONS VIDES AVANT DE COMMENCER
+    const validRows = [];
+    const skippedRows = [];
+    
+    for (let i = 0; i < rowsData.length; i++) {
+      const rowData = rowsData[i];
+      const lecon = rowData[findKey(rowData, 'Leçon')] || '';
+      const enseignant = rowData[findKey(rowData, 'Enseignant')] || '';
+      const classe = rowData[findKey(rowData, 'Classe')] || '';
+      const matiere = rowData[findKey(rowData, 'Matière')] || '';
+      
+      if (!lecon || lecon.trim() === '' || lecon.trim().length < 3) {
+        console.log(`⏭️  [${i+1}/${rowsData.length}] IGNORÉ (leçon vide): ${enseignant} | ${classe} | ${matiere}`);
+        skippedRows.push({ index: i+1, enseignant, classe, matiere, reason: 'Leçon vide' });
+      } else {
+        validRows.push({ index: i, rowData });
+      }
+    }
+    
+    console.log(`📊 [Multiple AI] ${validRows.length} lignes valides, ${skippedRows.length} ignorées`);
+    
+    if (validRows.length === 0) {
+      return res.status(400).json({ 
+        message: "Aucune ligne avec une leçon valide à générer.",
+        skipped: skippedRows
+      });
+    }
 
     // Charger le modèle Word une seule fois
     let templateBuffer;
@@ -1268,7 +1343,7 @@ app.post('/api/generate-multiple-ai-lesson-plans', async (req, res) => {
 
     // Configuration du ZIP
     const archive = archiver('zip', { zlib: { level: 9 } });
-    const filename = `Plans_Lecon_IA_S${week}_${rowsData.length}_fichiers.zip`;
+    const filename = `Plans_Lecon_IA_S${week}_${validRows.length}_fichiers.zip`;
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -1277,16 +1352,26 @@ app.post('/api/generate-multiple-ai-lesson-plans', async (req, res) => {
     const weekNumber = Number(week);
     const datesNode = specificWeekDateRangesNode[weekNumber];
 
-    // Résoudre le modèle Gemini une seule fois
-    const MODEL_NAME = await resolveGeminiModel(GEMINI_API_KEY);
-    console.log(`🤖 [Multiple AI] Modèle Gemini: ${MODEL_NAME}`);
+    // Résoudre le modèle selon le provider
+    let MODEL_NAME;
+    if (!USE_GROQ) {
+      MODEL_NAME = await resolveGeminiModel(GEMINI_API_KEY);
+      console.log(`🤖 [Multiple AI] Modèle GEMINI: ${MODEL_NAME}`);
+    }
 
     let successCount = 0;
     let errorCount = 0;
+    
+    // Si des lignes ont été ignorées, ajouter un fichier récapitulatif
+    if (skippedRows.length > 0) {
+      const skipContent = `⏭️  LIGNES IGNORÉES (LEÇONS VIDES)\n\nTotal: ${skippedRows.length} ligne(s)\n\n` +
+        skippedRows.map(r => `${r.index}. ${r.enseignant} | ${r.classe} | ${r.matiere}\n   Raison: ${r.reason}`).join('\n\n');
+      archive.append(Buffer.from(skipContent, 'utf-8'), { name: '00_LIGNES_IGNOREES.txt' });
+    }
 
-    // Générer chaque plan de leçon
-    for (let i = 0; i < rowsData.length; i++) {
-      const rowData = rowsData[i];
+    // Générer chaque plan de leçon (uniquement les lignes valides)
+    for (let i = 0; i < validRows.length; i++) {
+      const { index: originalIndex, rowData } = validRows[i];
       
       try {
         // Extraire données
@@ -1300,7 +1385,16 @@ app.post('/api/generate-multiple-ai-lesson-plans', async (req, res) => {
         const travaux = rowData[findKey(rowData, 'Travaux de classe')] || 'Non spécifié';
         const devoirsPrevus = rowData[findKey(rowData, 'Devoirs')] || 'Non spécifié';
 
-        console.log(`📝 [${i+1}/${rowsData.length}] ${enseignant} | ${classe} | ${matiere}`);
+        console.log(`📝 [${i+1}/${validRows.length}] (Ligne originale #${originalIndex+1}) ${enseignant} | ${classe} | ${matiere}`);
+        console.log(`  ├─ Leçon: "${lecon.substring(0, 50)}${lecon.length > 50 ? '...' : ''}"`);
+        console.log(`  ├─ Travaux: "${travaux.substring(0, 30)}${travaux.length > 30 ? '...' : ''}"`);
+        console.log(`  └─ Support: "${support.substring(0, 30)}${support.length > 30 ? '...' : ''}"`);
+        
+        // Note: Cette vérification n'est plus nécessaire car déjà filtrée au début
+        // Mais on la garde par sécurité
+        if (!lecon || lecon.trim() === '') {
+          throw new Error('⚠️ Leçon vide - impossible de générer un plan de leçon sans contenu de leçon');
+        }
 
         // Date formatée
         let formattedDate = "";
@@ -1327,31 +1421,132 @@ app.post('/api/generate-multiple-ai-lesson-plans', async (req, res) => {
           prompt = `Renvoie UNIQUEMENT du JSON valide. Pas de markdown, pas de blocs de code, pas de commentaire.\n\nEn tant qu'assistant pédagogique expert, crée un plan de leçon détaillé de 45 minutes en français. Structure en phases chronométrées et intègre les notes de l'enseignant :\n- Matière : ${matiere}, Classe : ${classe}, Thème : ${lecon}\n- Travaux de classe : ${travaux}\n- Support/Matériel : ${support}\n- Devoirs prévus : ${devoirsPrevus}\n\nUtilise la structure JSON suivante (valeurs concrètes et professionnelles ; clés strictement identiques) :\n${jsonStructure}`;
         }
 
-        // Appel API Gemini
-        const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
-        const aiResponse = await fetch(API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: prompt }] }]
-          })
-        });
-
-        if (!aiResponse.ok) {
-          throw new Error(`API Gemini error: ${aiResponse.status}`);
+        // Appel API selon le provider avec RETRY automatique
+        let aiResponse, aiResult, rawContent;
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
+        
+        while (retryCount <= MAX_RETRIES) {
+          try {
+            if (USE_GROQ) {
+              // GROQ API
+              const API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+              aiResponse = await fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${GROQ_API_KEY}`
+                },
+                body: JSON.stringify({
+                  model: 'llama-3.3-70b-versatile',
+                  messages: [{ role: 'user', content: prompt }],
+                  temperature: 0.7,
+                  max_tokens: 2048
+                })
+              });
+              
+              if (!aiResponse.ok) {
+                const errorBody = await aiResponse.json().catch(() => ({}));
+                
+                // Si erreur 429 (rate limit), on réessaye après un délai
+                if (aiResponse.status === 429 && retryCount < MAX_RETRIES) {
+                  const waitTime = Math.pow(2, retryCount) * 5000; // 5s, 10s, 20s
+                  console.log(`⏳ [GROQ] Rate limit atteint, attente ${waitTime/1000}s avant retry ${retryCount+1}/${MAX_RETRIES}`);
+                  await new Promise(resolve => setTimeout(resolve, waitTime));
+                  retryCount++;
+                  continue; // Réessayer
+                }
+                
+                console.error(`❌ [GROQ Error] Status ${aiResponse.status}:`, JSON.stringify(errorBody, null, 2));
+                throw new Error(`API GROQ error ${aiResponse.status}: ${errorBody.error?.message || JSON.stringify(errorBody)}`);
+              }
+              
+              aiResult = await aiResponse.json();
+              rawContent = aiResult?.choices?.[0]?.message?.content || "";
+              
+              if (!rawContent) {
+                console.error('❌ [GROQ] Réponse vide:', JSON.stringify(aiResult, null, 2));
+                throw new Error('GROQ a retourné une réponse vide');
+              }
+              
+              break; // Succès, sortir de la boucle retry
+              
+            } else {
+              // GEMINI API
+              const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+              aiResponse = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ role: "user", parts: [{ text: prompt }] }]
+                })
+              });
+              
+              if (!aiResponse.ok) {
+                const errorBody = await aiResponse.json().catch(() => ({}));
+                
+                // Si erreur 429 (rate limit), on réessaye après un délai
+                if (aiResponse.status === 429 && retryCount < MAX_RETRIES) {
+                  const waitTime = Math.pow(2, retryCount) * 5000; // 5s, 10s, 20s
+                  console.log(`⏳ [GEMINI] Quota dépassé, attente ${waitTime/1000}s avant retry ${retryCount+1}/${MAX_RETRIES}`);
+                  await new Promise(resolve => setTimeout(resolve, waitTime));
+                  retryCount++;
+                  continue; // Réessayer
+                }
+                
+                console.error(`❌ [GEMINI Error] Status ${aiResponse.status}:`, JSON.stringify(errorBody, null, 2));
+                
+                // Message spécifique pour quota dépassé
+                if (aiResponse.status === 429) {
+                  throw new Error(`⚠️ QUOTA GEMINI DÉPASSÉ (429): ${errorBody.error?.message || 'Limite atteinte'}`);
+                }
+                
+                throw new Error(`API GEMINI error ${aiResponse.status}: ${errorBody.error?.message || JSON.stringify(errorBody)}`);
+              }
+              
+              aiResult = await aiResponse.json();
+              rawContent = aiResult?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+              
+              if (!rawContent) {
+                console.error('❌ [GEMINI] Réponse vide:', JSON.stringify(aiResult, null, 2));
+                throw new Error('GEMINI a retourné une réponse vide');
+              }
+              
+              break; // Succès, sortir de la boucle retry
+            }
+          } catch (fetchError) {
+            // Si erreur réseau, réessayer
+            if (retryCount < MAX_RETRIES) {
+              const waitTime = Math.pow(2, retryCount) * 3000; // 3s, 6s, 12s
+              console.log(`⏳ Erreur réseau, attente ${waitTime/1000}s avant retry ${retryCount+1}/${MAX_RETRIES}`);
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+              retryCount++;
+              continue;
+            }
+            throw fetchError; // Après 3 essais, lancer l'erreur
+          }
         }
-
-        const aiResult = await aiResponse.json();
-        const rawContent = aiResult?.candidates?.[0]?.content?.parts?.[0]?.text || "";
         
         // Parser JSON
         let jsonData;
         try {
           const cleanedJson = rawContent.replace(/```json\n?|```\n?/g, '').trim();
+          
+          if (!cleanedJson) {
+            throw new Error('Contenu JSON vide après nettoyage');
+          }
+          
           jsonData = JSON.parse(cleanedJson);
+          
+          // Vérifier que les champs essentiels sont présents
+          if (!jsonData.TitreUnite && !jsonData.Objectifs && !jsonData.etapes) {
+            throw new Error('Structure JSON invalide : champs essentiels manquants');
+          }
         } catch (parseError) {
-          console.error(`Erreur parsing JSON pour ${classe} ${matiere}:`, parseError);
-          throw new Error("Format JSON invalide de l'IA");
+          console.error(`❌ Erreur parsing JSON pour ${classe} ${matiere}:`);
+          console.error(`  - Message: ${parseError.message}`);
+          console.error(`  - Contenu brut (100 premiers chars): ${rawContent.substring(0, 100)}`);
+          throw new Error(`Format JSON invalide: ${parseError.message}`);
         }
 
         // Générer le document Word
@@ -1387,39 +1582,142 @@ app.post('/api/generate-multiple-ai-lesson-plans', async (req, res) => {
         doc.render(templateData);
         const docBuffer = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
 
-        // Nom de fichier unique
-        const sanitizeForFilename = (str) => {
-          if (typeof str !== 'string') str = String(str);
-          return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-            .replace(/\s+/g, '-')
-            .replace(/[^a-zA-Z0-9-]/g, '_')
-            .replace(/__+/g, '_');
-        };
-
-        const docFilename = `${i+1}-Plan_Lecon-${sanitizeForFilename(matiere)}-${sanitizeForFilename(classe)}-S${weekNumber}.docx`;
+        // Format: Matière_Classe_Semaine_Séance_Enseignant.docx
+        const docFilename = `${sanitizeForFilename(matiere)}_${sanitizeForFilename(classe)}_S${weekNumber}_P${sanitizeForFilename(seance)}_${sanitizeForFilename(enseignant)}.docx`;
         
         // Ajouter au ZIP
         archive.append(docBuffer, { name: docFilename });
         successCount++;
         
-        console.log(`✅ [${i+1}/${rowsData.length}] Généré: ${docFilename}`);
+        console.log(`✅ [${i+1}/${validRows.length}] Généré: ${docFilename}`);
 
-        // Petit délai pour éviter de surcharger l'API
-        if (i < rowsData.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        // Délai adaptatif pour éviter rate limit
+        if (i < validRows.length - 1) {
+          // Délai progressif : 3s pour les premières, 5s après 10, 8s après 20
+          let delay = 3000; // 3 secondes par défaut
+          if (i >= 20) delay = 8000; // 8 secondes après 20 générations
+          else if (i >= 10) delay = 5000; // 5 secondes après 10 générations
+          
+          console.log(`⏳ Pause de ${delay/1000}s avant la prochaine génération...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
 
       } catch (error) {
-        console.error(`❌ Erreur pour ligne ${i+1}:`, error.message);
+        const classe = rowData[findKey(rowData, 'Classe')] || 'Unknown';
+        const matiere = rowData[findKey(rowData, 'Matière')] || 'Unknown';
+        const enseignant = rowData[findKey(rowData, 'Enseignant')] || 'Unknown';
+        const lecon = rowData[findKey(rowData, 'Leçon')] || 'VIDE';
+        
+        console.error(`❌ Erreur pour ligne ${i+1}:`, {
+          error: error.message,
+          stack: error.stack,
+          classe,
+          matiere,
+          enseignant,
+          lecon: lecon.substring(0, 50) // Premiers 50 caractères
+        });
         errorCount++;
         
-        // Ajouter un fichier texte d'erreur dans le ZIP
-        const errorFilename = `${i+1}-ERREUR-${rowData[findKey(rowData, 'Classe')] || 'Unknown'}.txt`;
-        archive.append(`Erreur de génération: ${error.message}`, { name: errorFilename });
+        // Ajouter un fichier texte d'erreur DÉTAILLÉ dans le ZIP
+        const errorFilename = `ERREUR_${String(i+1).padStart(2, '0')}_${sanitizeForFilename(classe)}_${sanitizeForFilename(matiere)}.txt`;
+        const errorContent = `❌ ERREUR DE GÉNÉRATION - PLAN DE LEÇON IA
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📍 INFORMATIONS DE LA LIGNE
+  Ligne valide    : ${i+1}/${validRows.length}
+  Ligne originale : ${originalIndex+1}/${rowsData.length}
+  
+👤 ENSEIGNANT     : ${enseignant}
+📚 CLASSE         : ${classe}
+📖 MATIÈRE        : ${matiere}
+
+📝 LEÇON (premiers 300 caractères) :
+${lecon.substring(0, 300)}${lecon.length > 300 ? '...' : ''}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️  ERREUR DÉTECTÉE :
+${error.message}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔍 STACK TRACE COMPLET :
+${error.stack}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 DONNÉES COMPLÈTES DE LA LIGNE :
+${JSON.stringify(rowData, null, 2)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 SOLUTIONS POSSIBLES :
+1. Vérifier que la clé API (GROQ ou GEMINI) est valide
+2. Vérifier que le quota API n'est pas dépassé
+3. Vérifier que la leçon contient suffisamment d'information
+4. Réessayer la génération plus tard si c'est un problème de quota
+5. Contacter le support si l'erreur persiste
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Date: ${new Date().toISOString()}
+Provider IA: ${USE_GROQ ? 'GROQ (llama-3.3-70b-versatile)' : 'GEMINI'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+        archive.append(Buffer.from(errorContent, 'utf-8'), { name: errorFilename });
       }
     }
 
     console.log(`📊 [Multiple AI] Résultat: ${successCount} succès, ${errorCount} erreurs`);
+    
+    // Ajouter un fichier récapitulatif final
+    const summaryContent = `📊 RÉCAPITULATIF DE GÉNÉRATION - PLANS DE LEÇON IA
+    
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📅 Date de génération : ${new Date().toLocaleString('fr-FR')}
+📦 Semaine            : ${week}
+🔧 Provider IA        : ${USE_GROQ ? 'GROQ (llama-3.3-70b-versatile)' : 'GEMINI (' + (MODEL_NAME || 'N/A') + ')'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 STATISTIQUES :
+  Lignes totales reçues  : ${rowsData.length}
+  Lignes valides         : ${validRows.length}
+  Lignes ignorées        : ${skippedRows.length} (leçons vides)
+  
+  ✅ Succès              : ${successCount}
+  ❌ Erreurs             : ${errorCount}
+  
+  📊 Taux de réussite    : ${validRows.length > 0 ? Math.round((successCount / validRows.length) * 100) : 0}%
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${errorCount > 0 ? `⚠️  ATTENTION : ${errorCount} erreur(s) détectée(s)
+Consultez les fichiers ERREUR_XX_*.txt pour plus de détails.
+
+💡 CAUSES POSSIBLES DES ERREURS :
+- Quota API dépassé (429)
+- Problème de connexion réseau
+- Format de réponse invalide de l'IA
+- Données de leçon insuffisantes
+
+🔑 SOLUTION : Configurer GROQ_API_KEY sur Vercel
+GROQ offre un quota gratuit plus généreux que GEMINI.
+Instructions : Voir README.md du projet
+` : '🎉 Toutes les générations ont réussi !'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📁 CONTENU DU ZIP :
+${skippedRows.length > 0 ? `  - 00_LIGNES_IGNOREES.txt (${skippedRows.length} lignes)\n` : ''}  - ${successCount} fichier(s) .docx (plans générés)
+${errorCount > 0 ? `  - ${errorCount} fichier(s) ERREUR_*.txt (détails des erreurs)\n` : ''}  - 99_RECAPITULATIF.txt (ce fichier)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Généré par le système de gestion des plans hebdomadaires
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+    archive.append(Buffer.from(summaryContent, 'utf-8'), { name: '99_RECAPITULATIF.txt' });
     
     archive.finalize();
 
@@ -2203,300 +2501,6 @@ app.post('/api/notify-incomplete-teachers', async (req, res) => {
     res.status(500).json({ 
       message: 'Erreur serveur.',
       error: error.message 
-    });
-  }
-});
-
-// ============================================================================
-// NOUVELLE ROUTE: Remplissage automatique depuis la distribution annuelle
-// ============================================================================
-app.post('/api/auto-fill-from-distribution', async (req, res) => {
-  const DISTRIBUTION_MONGO_URL = 'mongodb+srv://mohamedsherif:Mmedch86@distribution-annuel-202.rq80vms.mongodb.net/?retryWrites=true&w=majority&appName=Distribution-annuel-2026';
-  
-  try {
-    const { week } = req.body;
-    
-    if (!week || isNaN(parseInt(week))) {
-      return res.status(400).json({ message: 'Numéro de semaine requis.' });
-    }
-    
-    const weekNumber = parseInt(week, 10);
-    console.log(`🔄 Remplissage automatique pour la semaine ${weekNumber}...`);
-    
-    // Connexion à la base de données principale (plans hebdomadaires)
-    const mainDb = await connectToDatabase();
-    const planDocument = await mainDb.collection('plans').findOne({ week: weekNumber });
-    
-    if (!planDocument || !planDocument.data || planDocument.data.length === 0) {
-      return res.status(404).json({ 
-        message: `Aucun plan existant trouvé pour la semaine ${weekNumber}. Veuillez d'abord charger les données via Excel.` 
-      });
-    }
-    
-    // Connexion à la base de données de distribution annuelle
-    const distributionClient = new MongoClient(DISTRIBUTION_MONGO_URL);
-    await distributionClient.connect();
-    console.log('✅ Connecté à la base de distribution annuelle');
-    
-    // Fonction pour normaliser les noms de matières
-    const normalizeMatiere = (matiere) => {
-      if (!matiere || typeof matiere !== 'string') return '';
-      const normalized = matiere.toLowerCase().trim()
-        .replace(/\s+/g, ' ')
-        .replace(/[.,]/g, '');
-      return normalized;
-    };
-    
-    // Mapping des variations de noms de matières
-    const matiereVariations = {
-      'langue et litterature': ['langue et litterature', 'langue et litt', 'll', 'l l', 'langue', 'litterature'],
-      'mathematiques': ['mathematiques', 'maths', 'math', 'mathématiques'],
-      'sciences': ['sciences', 'science', 'sc'],
-      'education islamique': ['education islamique', 'ed islamique', 'islamique', 'islam'],
-      'arabe': ['arabe', 'ar', 'langue arabe'],
-      'anglais': ['anglais', 'english', 'eng', 'an'],
-      'francais': ['francais', 'français', 'fr', 'langue française'],
-      'histoire': ['histoire', 'hist', 'h'],
-      'geographie': ['geographie', 'géographie', 'geo', 'g'],
-      'education physique': ['education physique', 'ed physique', 'eps', 'sport'],
-      'arts': ['arts', 'art', 'dessin'],
-      'musique': ['musique', 'music']
-    };
-    
-    // Fonction pour trouver la matière canonique
-    const findCanonicalMatiere = (matiere) => {
-      const normalized = normalizeMatiere(matiere);
-      for (const [canonical, variations] of Object.entries(matiereVariations)) {
-        if (variations.includes(normalized)) {
-          return canonical;
-        }
-      }
-      return normalized;
-    };
-    
-    // Fonction pour vérifier si deux matières correspondent
-    const matiereMatches = (matiere1, matiere2) => {
-      const canon1 = findCanonicalMatiere(matiere1);
-      const canon2 = findCanonicalMatiere(matiere2);
-      return canon1 === canon2;
-    };
-    
-    // Mapping des noms de classes entre le plan et la base de distribution
-    const classMapping = {
-      'PEI1 G': 'Classe_PEI1_G',
-      'PEI2 G': 'Classe_PEI2_G',
-      'PEI3 G': 'Classe_PEI3_G',
-      'PEI4 G': 'Classe_PEI4_G',
-      'PEI5 G': 'Classe_PEI5_G',
-      'DP1': 'Classe_DP1',
-      'DP2': 'Classe_DP2',
-      'DP2 G': 'Classe_DP2_G',
-      'PP1': 'Classe_PP1',
-      'PP2': 'Classe_PP2',
-      'PP3': 'Classe_PP3',
-      'PP4': 'Classe_PP4',
-      'PP5': 'Classe_PP5',
-      'GS': 'Classe_GS',
-      'MS': 'Classe_MS'
-    };
-    
-    let updatedCount = 0;
-    let totalProcessed = 0;
-    const errors = [];
-    
-    // Grouper les données par classe
-    const dataByClass = {};
-    for (const row of planDocument.data) {
-      const classeKey = findKey(row, 'Classe');
-      const classe = classeKey ? row[classeKey] : null;
-      if (classe) {
-        if (!dataByClass[classe]) {
-          dataByClass[classe] = [];
-        }
-        dataByClass[classe].push(row);
-      }
-    }
-    
-    console.log(`📊 Classes à traiter: ${Object.keys(dataByClass).length}`);
-    
-    // Traiter chaque classe
-    for (const [classe, rows] of Object.entries(dataByClass)) {
-      const dbName = classMapping[classe];
-      
-      if (!dbName) {
-        console.log(`⚠️ Classe ${classe} non mappée`);
-        continue;
-      }
-      
-      try {
-        const classDb = distributionClient.db(dbName);
-        const tablesCollection = classDb.collection('tables');
-        
-        // Récupérer toutes les tables (matières) de cette classe
-        const tables = await tablesCollection.find({}).toArray();
-        console.log(`📚 Classe ${classe}: ${tables.length} matières trouvées`);
-        
-        // Traiter chaque ligne du plan pour cette classe
-        for (const row of rows) {
-          totalProcessed++;
-          
-          const enseignantKey = findKey(row, 'Enseignant');
-          const matiereKey = findKey(row, 'Matière');
-          const jourKey = findKey(row, 'Jour');
-          const leconKey = findKey(row, 'Leçon');
-          // Chercher "Travaux de classe" ou "Travaux"
-          const travauxKey = findKey(row, 'Travaux de classe') || findKey(row, 'Travaux');
-          const periodeKey = findKey(row, 'Période');
-          
-          const matiere = matiereKey ? row[matiereKey] : null;
-          const jour = jourKey ? row[jourKey] : null;
-          
-          console.log(`🔍 Traitement: ${classe} - ${matiere} - ${jour}`);
-          
-          if (!matiere || !jour) {
-            console.log(`⚠️ Matière ou jour manquant pour ${classe}`);
-            continue;
-          }
-          
-          // Extraire seulement le nom du jour (sans la date)
-          const jourName = extractDayNameFromString(jour);
-          if (!jourName) {
-            console.log(`⚠️ Impossible d'extraire le nom du jour de: ${jour}`);
-            continue;
-          }
-          
-          console.log(`🔎 Recherche: ${classe} - ${matiere} - ${jourName}`);
-          
-          // Chercher la table correspondante dans la distribution
-          let matchingTable = null;
-          for (const table of tables) {
-            if (table.matiere && matiereMatches(table.matiere, matiere)) {
-              matchingTable = table;
-              console.log(`✓ Table trouvée: ${table.matiere} ≈ ${matiere}`);
-              break;
-            }
-          }
-          
-          if (!matchingTable || !matchingTable.data || !Array.isArray(matchingTable.data)) {
-            console.log(`❌ Pas de table pour: ${matiere} (dans ${classe})`);
-            if (!matchingTable) {
-              console.log(`   Matières disponibles:`, tables.map(t => t.matiere).join(', '));
-            }
-            continue;
-          }
-          
-          // Chercher la ligne correspondante dans la distribution
-          // Format: [["Mois", "Semaine", "Date", "Jour", "Unité/Chapitre", "Contenu de la leçon", ...], ...]
-          const headerRow = matchingTable.data[0];
-          const semaineIndex = headerRow ? headerRow.findIndex(h => h && h.toLowerCase().includes('semaine')) : -1;
-          const jourIndex = headerRow ? headerRow.findIndex(h => h && h.toLowerCase().includes('jour')) : -1;
-          const contenuIndex = headerRow ? headerRow.findIndex(h => h && h.toLowerCase().includes('contenu')) : -1;
-          const uniteIndex = headerRow ? headerRow.findIndex(h => h && (h.toLowerCase().includes('unité') || h.toLowerCase().includes('chapitre'))) : -1;
-          const devoirIndex = headerRow ? headerRow.findIndex(h => h && h.toLowerCase().includes('devoir')) : -1;
-          
-          if (semaineIndex === -1 || jourIndex === -1) {
-            continue;
-          }
-          
-          // Chercher la ligne avec la bonne semaine et le bon jour
-          let matchingRow = null;
-          const semainePattern = `Semaine ${weekNumber}`;
-          
-          console.log(`🔍 Recherche dans la table: Semaine=${semainePattern}, Jour=${jourName}`);
-          
-          for (let i = 1; i < matchingTable.data.length; i++) {
-            const dataRow = matchingTable.data[i];
-            const rowSemaine = dataRow[semaineIndex];
-            const rowJour = dataRow[jourIndex];
-            
-            if (rowSemaine && rowSemaine.includes(semainePattern) && rowJour && rowJour === jourName) {
-              matchingRow = dataRow;
-              console.log(`✓ Ligne trouvée à l'index ${i}: Semaine=${rowSemaine}, Jour=${rowJour}`);
-              break;
-            }
-          }
-          
-          if (!matchingRow) {
-            console.log(`❌ Aucune ligne trouvée pour Semaine ${weekNumber} - ${jourName}`);
-            console.log(`   Indices: semaine=${semaineIndex}, jour=${jourIndex}, contenu=${contenuIndex}, devoir=${devoirIndex}`);
-            continue;
-          }
-          
-          // Remplir les données
-          let updated = false;
-          
-          console.log(`📝 Remplissage pour ${classe} - ${matiere} - ${jourName}`);
-          console.log(`   Clés: leconKey=${leconKey}, travauxKey=${travauxKey}`);
-          
-          // Contenu de la leçon
-          if (contenuIndex !== -1 && matchingRow[contenuIndex]) {
-            const contenu = matchingRow[contenuIndex].trim();
-            if (contenu && leconKey) {
-              console.log(`   ✓ Contenu trouvé: "${contenu.substring(0, 50)}..."`);
-              row[leconKey] = contenu;
-              updated = true;
-            }
-          }
-          
-          // Unité/Chapitre (ajouté avant le contenu)
-          if (uniteIndex !== -1 && matchingRow[uniteIndex]) {
-            const unite = matchingRow[uniteIndex].trim();
-            if (unite && leconKey) {
-              console.log(`   ✓ Unité trouvée: "${unite}"`);
-              const currentLecon = row[leconKey] || '';
-              row[leconKey] = unite + (currentLecon ? '\n' + currentLecon : '');
-              updated = true;
-            }
-          }
-          
-          // Devoir/Travaux
-          if (devoirIndex !== -1 && matchingRow[devoirIndex]) {
-            const devoir = matchingRow[devoirIndex].trim();
-            if (devoir && travauxKey) {
-              console.log(`   ✓ Devoir trouvé: "${devoir.substring(0, 50)}..."`);
-              row[travauxKey] = devoir;
-              updated = true;
-            }
-          }
-          
-          if (updated) {
-            updatedCount++;
-            console.log(`✅ Mis à jour: ${classe} - ${matiere} - ${jourName}`);
-          } else {
-            console.log(`⚠️ Aucune mise à jour pour: ${classe} - ${matiere} - ${jourName}`);
-          }
-        }
-      } catch (classError) {
-        console.error(`❌ Erreur classe ${classe}:`, classError.message);
-        errors.push({ classe, error: classError.message });
-      }
-    }
-    
-    // Sauvegarder les modifications
-    if (updatedCount > 0) {
-      await mainDb.collection('plans').updateOne(
-        { week: weekNumber },
-        { $set: { data: planDocument.data } }
-      );
-      console.log(`💾 ${updatedCount} lignes mises à jour et sauvegardées`);
-    }
-    
-    await distributionClient.close();
-    
-    res.status(200).json({
-      success: true,
-      message: `Remplissage automatique terminé pour la semaine ${weekNumber}`,
-      updatedCount,
-      totalProcessed,
-      errors: errors.length > 0 ? errors : undefined
-    });
-    
-  } catch (error) {
-    console.error('❌ Erreur /auto-fill-from-distribution:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors du remplissage automatique.',
-      error: error.message
     });
   }
 });
