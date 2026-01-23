@@ -64,7 +64,23 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(fileUpload());
+// --- CONFIGURATION POUR LE FRONTEND ---
+// On définit le chemin vers le dossier public (qui est un dossier parent à 'api')
+const publicPath = path.join(__dirname, '..', 'public');
 
+// 1. On dit à Express de rendre accessibles les fichiers statiques (CSS, JS, Images)
+app.use(express.static(publicPath));
+
+// 2. Route pour la page d'accueil (Health Check de Railway)
+app.get('/', (req, res) => {
+  res.sendFile(path.join(publicPath, 'index.html'));
+});
+
+// 3. Route de secours pour le diagnostic (optionnel)
+app.get('/diagnostic', (req, res) => {
+  res.sendFile(path.join(publicPath, 'diagnostic.html'));
+});
+// --------------------------------------
 const MONGO_URL = process.env.MONGO_URL;
 const WORD_TEMPLATE_URL = process.env.WORD_TEMPLATE_URL;
 const LESSON_TEMPLATE_URL = process.env.LESSON_TEMPLATE_URL;
@@ -2508,8 +2524,8 @@ app.post('/api/notify-incomplete-teachers', async (req, res) => {
 app.get('/', (req, res) => {
   res.status(200).send('Serveur API Plan Hebdomadaire opérationnel');
 });
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 8080; // Railway utilise souvent 8080 par défaut
 
-module.exports = app;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server is running and listening on 0.0.0.0:${PORT}`);
+});
