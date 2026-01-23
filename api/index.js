@@ -92,6 +92,12 @@ const MONGO_URL = process.env.MONGO_URL;
 const WORD_TEMPLATE_URL = process.env.WORD_TEMPLATE_URL;
 const LESSON_TEMPLATE_URL = process.env.LESSON_TEMPLATE_URL;
 
+// Configuration IA Providers (GROQ et GEMINI)
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const USE_GROQ = GROQ_API_KEY ? true : false;
+const AI_API_KEY = USE_GROQ ? GROQ_API_KEY : GEMINI_API_KEY;
+
 // Configuration Web Push (VAPID)
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || 'BDuAoL4lagqZmYl4BPdCFYBwRhoqGMrcWUFAbF1pMBWq2e0JOV6fL_WitURlXXhXTROGB2vYpnvgSDZfAoZq0Jo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || 'TVK1zF6o5s-SK3OQnGCMgu4KZCNxg3py4YA4sMqtItg';
