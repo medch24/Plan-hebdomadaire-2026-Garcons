@@ -2504,7 +2504,10 @@ app.post('/api/notify-incomplete-teachers', async (req, res) => {
     });
   }
 });
-
+// Route pour éviter le "Cannot GET /" et valider le Health Check de Railway
+app.get('/', (req, res) => {
+  res.status(200).send('Serveur API Plan Hebdomadaire opérationnel');
+});
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
