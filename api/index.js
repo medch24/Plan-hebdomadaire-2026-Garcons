@@ -2409,7 +2409,12 @@ app.post('/api/send-weekly-reminders', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+// Vérifiez qu'il n'y a pas d'autre "const PORT" plus haut
+const PORT = process.env.PORT || 8080; 
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server is running on port ${PORT}`);
+});
 // ============================================================================
 // NOUVELLE ROUTE: Notification en temps réel pour enseignants incomplets
 // ============================================================================
