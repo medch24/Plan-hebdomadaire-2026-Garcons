@@ -213,6 +213,12 @@
                 return;
             }
             data.forEach((rowObj, rIdx) => {
+                console.log(`📊 Ligne ${rIdx}:`, {
+                    Enseignant: rowObj[findHKey('Enseignant')],
+                    Classe: rowObj[findHKey('Classe')],
+                    Matière: rowObj[findHKey('Matière')],
+                    lessonPlanId: rowObj.lessonPlanId || '❌ NON PRÉSENT'
+                });
                 const tr = document.createElement('tr');
                 tr.dataset.rowIndex = rIdx;
                 hDisp.forEach(header => {
@@ -287,8 +293,11 @@
                 
                 // Changer la couleur si un plan de leçon existe déjà (vert au lieu de bleu)
                 if (rowObj && rowObj.lessonPlanId) {
+                    console.log(`🟢 Bouton VERT pour lessonPlanId: ${rowObj.lessonPlanId}`);
                     aiGenBtn.classList.add('lesson-plan-exists');
                     aiGenBtn.title = 'Plan de Leçon déjà généré - Régénérer';
+                } else {
+                    console.log(`🔵 Bouton BLEU (pas de lessonPlanId)`);
                 }
                 
                 aiGenBtn.onclick = () => generateAILessonPlan(rowObj, tr);
