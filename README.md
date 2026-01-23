@@ -75,3 +75,4 @@ Les plans de leçon générés incluent :
 # Deploy: 2026-01-21 11:24:15
 # Deploy: 2026-01-23 11:48:03 UTC
 # Deploy: 2026-01-23 12:17:09 UTC - Correction critique USE_GROQ
+# Force deploy: 2026-01-23 19:18:37 UTC - Bouton disquette
