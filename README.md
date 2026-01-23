@@ -78,3 +78,5 @@ Les plans de leçon générés incluent :
 # Force deploy: 2026-01-23 19:18:37 UTC - Bouton disquette
 
 🔄 Redéploiement: 2026-01-23 21:55:53 - Test bouton disquette BLEU→VERT
+
+🔄 FORCE REDEPLOY: 2026-01-23 22:22:05 - Corrections colonnes + noms enseignants

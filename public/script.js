@@ -19,6 +19,11 @@
         const arabicTeachers = ['Majed', 'Jaber', 'Imad'];
         const englishTeachers = ['Kamel'];
         const isArabicUser = () => currentUserLanguage === 'ar';
+        
+        // Version du code pour vérifier le déploiement
+        console.log('%c🚀 VERSION DÉPLOYÉE: 2026-01-23 15:30 - Garçons', 'background: #0066CC; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;');
+        console.log('📋 Enseignants Arabes:', arabicTeachers);
+        console.log('📋 Enseignants Anglais:', englishTeachers);
 
         // Traductions
         const translations = {
