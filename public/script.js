@@ -16,8 +16,8 @@
         // Version d'authentification pour forcer la déconnexion
         const AUTH_VERSION = 2; // Incrémenter pour forcer tous les utilisateurs à se reconnecter
 
-        const arabicTeachers = ['Sara', 'Amal Najar', 'Emen', 'Fatima', 'Ghadah', 'Hana'];
-        const englishTeachers = ['Jana','Amal','Farah','Tayba','Shanoja'];
+        const arabicTeachers = ['Majed', 'Jaber', 'Imad'];
+        const englishTeachers = ['Kamel'];
         const isArabicUser = () => currentUserLanguage === 'ar';
 
         // Traductions

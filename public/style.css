@@ -421,15 +421,16 @@ body::before {
 #planTable td:not(.editable) {
     white-space: nowrap;
     width: 1%;
-    max-width: 100px;
+    max-width: 80px; /* Réduit de 100px à 80px */
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size: 0.9rem; /* Texte légèrement plus petit */
 }
 
-/* Colonnes éditables - largeur flexible */
+/* Colonnes éditables - largeur flexible MAXIMALE */
 #planTable td.editable {
     width: auto;
-    min-width: 200px;
+    min-width: 250px; /* Augmenté de 200px à 250px */
     max-width: none;
 }
 
@@ -475,7 +476,7 @@ td.editable {
     cursor: text;
     transition: all var(--transition-speed);
     overflow: visible;
-    min-width: 200px;
+    min-width: 250px; /* Augmenté de 200px à 250px pour plus d'espace */
     min-height: auto;
     max-width: none;
     position: relative;
@@ -484,6 +485,13 @@ td.editable {
     word-wrap: break-word;
     height: auto;
 }
+
+/* Largeurs spécifiques pour colonnes immodifiables */
+#planTable th:nth-child(1), #planTable td:nth-child(1) { max-width: 70px; } /* Enseignant */
+#planTable th:nth-child(2), #planTable td:nth-child(2) { max-width: 75px; } /* Jour */
+#planTable th:nth-child(3), #planTable td:nth-child(3) { max-width: 55px; } /* Période */
+#planTable th:nth-child(4), #planTable td:nth-child(4) { max-width: 70px; } /* Classe */
+#planTable th:nth-child(5), #planTable td:nth-child(5) { max-width: 75px; } /* Matière */
 
 td.editable::before {
     content: '✎';
