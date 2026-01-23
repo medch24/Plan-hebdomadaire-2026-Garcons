@@ -283,6 +283,7 @@
                 aiGenBtn.title = 'Générer Plan de Leçon de cette séance';
                 aiGenBtn.classList.add('ai-lesson-plan-button');
                 aiGenBtn.style.marginLeft = '5px';
+                console.log('🔵 Bouton disquette créé:', aiGenBtn);
                 
                 // Changer la couleur si un plan de leçon existe déjà (vert au lieu de bleu)
                 if (rowObj && rowObj.lessonPlanId) {
