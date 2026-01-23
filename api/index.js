@@ -1,5 +1,12 @@
 // api/index.js — v1, sélection dynamique du modèle, sortie JSON via prompt (sans generationConfig)
 
+// Protection contre les chargements multiples du module (Railway/Serverless)
+if (global.appInstance) {
+  console.log('⚠️ Module api/index.js déjà chargé, réutilisation de l\'instance existante');
+  module.exports = global.appInstance;
+  return;
+}
+
 const express = require('express');
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
@@ -2522,8 +2529,17 @@ app.post('/api/notify-incomplete-teachers', async (req, res) => {
 app.get('/', (req, res) => {
   res.status(200).send('Serveur API Plan Hebdomadaire opérationnel');
 });
-const PORT = process.env.PORT || 8080; // Railway utilise souvent 8080 par défaut
+// Configuration Port et Host pour Railway
+const PORT = process.env.PORT || 8080;
+const HOST = '0.0.0.0';
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Server is running and listening on 0.0.0.0:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`✅ Server is running and listening on ${HOST}:${PORT}`);
+  console.log(`🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔑 IA Provider: ${USE_GROQ ? 'GROQ (llama-3.3-70b)' : 'GEMINI'}`);
+  console.log(`📊 MongoDB: ${MONGO_URL ? '✅ Configured' : '❌ Missing'}`);
+  console.log(`📄 Templates: ${LESSON_TEMPLATE_URL && WORD_TEMPLATE_URL ? '✅ Configured' : '❌ Missing'}`);
 });
+
+// Enregistrer l'instance globale pour éviter les rechargements multiples
+global.appInstance = app;
