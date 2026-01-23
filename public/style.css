@@ -764,6 +764,20 @@ td.editable.arabic-content {
     color: var(--primary-color); 
 }
 
+/* Bouton disquette VERT si plan de leçon déjà généré */
+.ai-lesson-plan-button.lesson-plan-exists {
+    color: var(--success-color);
+}
+
+.ai-lesson-plan-button.lesson-plan-exists:hover::before {
+    background: rgba(16, 185, 129, 0.2);
+}
+
+.ai-lesson-plan-button.lesson-plan-exists:hover {
+    color: var(--success-hover);
+    filter: drop-shadow(0 4px 8px rgba(16, 185, 129, 0.5));
+}
+
 .save-indicator {
     color: var(--success-color);
     margin-left: 8px;

@@ -283,6 +283,13 @@
                 aiGenBtn.title = 'Générer Plan de Leçon de cette séance';
                 aiGenBtn.classList.add('ai-lesson-plan-button');
                 aiGenBtn.style.marginLeft = '5px';
+                
+                // Changer la couleur si un plan de leçon existe déjà (vert au lieu de bleu)
+                if (rowObj && rowObj.lessonPlanId) {
+                    aiGenBtn.classList.add('lesson-plan-exists');
+                    aiGenBtn.title = 'Plan de Leçon déjà généré - Régénérer';
+                }
+                
                 aiGenBtn.onclick = () => generateAILessonPlan(rowObj, tr);
                 actTd.appendChild(aiGenBtn);
                 
@@ -353,6 +360,17 @@
                     
                     saveAs(blob, filename);
                     displayAlert('ai_lesson_plan_generated', false);
+                    
+                    // Mettre à jour le bouton disquette en VERT (plan généré)
+                    if (aiButton) {
+                        aiButton.classList.add('lesson-plan-exists');
+                        aiButton.title = 'Plan de Leçon déjà généré - Régénérer';
+                    }
+                    
+                    // Marquer dans rowData qu'un plan existe (pour réaffichage)
+                    if (rowData) {
+                        rowData.lessonPlanId = 'generated';
+                    }
                 } else {
                     const errorResult = await response.json().catch(() => ({ message: "Erreur inconnue du serveur." }));
                     throw new Error(errorResult.message || `Erreur serveur ${response.status}`);
