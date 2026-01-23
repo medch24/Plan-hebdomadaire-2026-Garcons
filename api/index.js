@@ -10,7 +10,7 @@ const fetch = require('node-fetch');
 const { MongoClient } = require('mongodb');
 const archiver = require('archiver');
 const webpush = require('web-push');
-
+const path = require('path');
 // ========================================================================
 // ====================== AIDES POUR GÉNÉRATION WORD ======================
 // ========================================================================
