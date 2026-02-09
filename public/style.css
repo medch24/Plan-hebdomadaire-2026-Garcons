@@ -156,9 +156,15 @@ body::before {
 
 #logo, #logo-main {
     max-width: 120px;
+    width: 120px;
+    height: 120px;
     margin-bottom: 15px;
     transition: all 0.3s ease;
     filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid rgba(255, 255, 255, 0.8);
+    background: white;
 }
 
 #logo:hover, #logo-main:hover {
