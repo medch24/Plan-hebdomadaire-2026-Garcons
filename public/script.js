@@ -546,11 +546,17 @@
             
             displayAlert('welcome_user', false, { user: loggedInUser });
             
-            // Charger automatiquement la semaine actuelle et afficher les alertes
+            // Charger automatiquement la semaine SUIVANTE (N+1) par défaut
             const currentWeekNum = getCurrentWeekNumber();
             if (currentWeekNum) {
-                console.log(`📅 Semaine actuelle détectée: ${currentWeekNum}`);
-                document.getElementById('weekSelector').value = currentWeekNum;
+                // Charger la semaine suivante (semaine actuelle + 1)
+                const nextWeekNum = currentWeekNum + 1;
+                // Vérifier que la semaine suivante existe dans notre calendrier
+                const weekExists = specificWeekDateRanges[nextWeekNum];
+                const weekToLoad = weekExists ? nextWeekNum : currentWeekNum;
+                
+                console.log(`📅 Semaine actuelle: ${currentWeekNum}, Chargement automatique: Semaine ${weekToLoad}`);
+                document.getElementById('weekSelector').value = weekToLoad;
                 setTimeout(async () => {
                     await loadPlanForWeek();
                     // Afficher automatiquement la liste des enseignants incomplets si nécessaire
@@ -567,7 +573,7 @@
                         displayAlert(`⚠️ Attention: ${Object.keys(incompleteTeachersInfo).length} enseignant(s) n'ont pas encore terminé leurs travaux de classe pour cette semaine!`, true);
                         
                         // 🔔 NOUVEAU: Envoyer des notifications push aux enseignants incomplets
-                        await notifyIncompleteTeachers(currentWeekNum, incompleteTeachersInfo);
+                        await notifyIncompleteTeachers(weekToLoad, incompleteTeachersInfo);
                     }
                 }, 500);
             }
