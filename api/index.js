@@ -1005,18 +1005,21 @@ app.post('/api/generate-ai-lesson-plan', async (req, res) => {
   try {
     console.log('📝 [AI Lesson Plan] Nouvelle demande de génération');
     
-    // Support GROQ API (prioritaire) avec fallback vers GEMINI
-    const GROQ_API_KEY = process.env.GROQ_API_KEY;
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    const USE_GROQ = GROQ_API_KEY ? true : false;
+    // Pool de clés GROQ API avec rotation automatique
+    const GROQ_API_KEYS = [
+      process.env.GROQ_API_KEY,
+      process.env.GROQ_API_KEY_BACKUP // Clé de secours
+    ].filter(Boolean); // Filtrer les clés vides
     
-    if (!GROQ_API_KEY && !GEMINI_API_KEY) {
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    
+    if (GROQ_API_KEYS.length === 0 && !GEMINI_API_KEY) {
       console.error('❌ [AI Lesson Plan] Aucune clé API (GROQ ou GEMINI) disponible');
       return res.status(503).json({ message: "Le service IA n'est pas initialisé. Vérifiez les clés API GROQ ou GEMINI du serveur." });
     }
     
-    console.log(`🔧 [AI Lesson Plan] Provider IA: ${USE_GROQ ? 'GROQ (llama-3.3-70b)' : 'GEMINI'}`);
-    const AI_API_KEY = USE_GROQ ? GROQ_API_KEY : GEMINI_API_KEY;
+    console.log(`🔧 [AI Lesson Plan] ${GROQ_API_KEYS.length} clé(s) GROQ disponible(s), GEMINI: ${GEMINI_API_KEY ? 'Oui' : 'Non'}`);
+    const AI_API_KEY = null; // Non utilisé avec le nouveau système
 
     const lessonTemplateUrl = process.env.LESSON_TEMPLATE_URL || LESSON_TEMPLATE_URL;
     if (!lessonTemplateUrl) {
@@ -1111,73 +1114,102 @@ Utilise la structure JSON suivante (valeurs concrètes et professionnelles ; cl�
 ${jsonStructure}`;
     }
 
-    // === Configuration de l'API selon le provider ===
+    // === Essayer toutes les clés GROQ en rotation, puis fallback vers GEMINI ===
     let API_URL, requestBody, aiResponse;
+    let lastError = null;
+    let providerUsed = null;
     
-    if (USE_GROQ) {
-      // GROQ API (quota plus généreux)
-      console.log('🤖 [AI Lesson Plan] Utilisation de GROQ API avec llama-3.3-70b-versatile');
+    // Essayer toutes les clés GROQ
+    for (let i = 0; i < GROQ_API_KEYS.length; i++) {
+      const GROQ_KEY = GROQ_API_KEYS[i];
+      console.log(`🤖 [AI Lesson Plan] Tentative ${i + 1}/${GROQ_API_KEYS.length} avec GROQ (llama-3.3-70b)`);
+      
       API_URL = 'https://api.groq.com/openai/v1/chat/completions';
       requestBody = {
         model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'user', content: prompt }
-        ],
+        messages: [{ role: 'user', content: prompt }],
         temperature: 0.7,
         max_tokens: 2048
       };
       
-      console.log('🔄 [AI Lesson Plan] Appel à l\'API GROQ...');
-      aiResponse = await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${GROQ_API_KEY}`
-        },
-        body: JSON.stringify(requestBody),
-      });
-    } else {
-      // GEMINI API (fallback)
-      console.log('🤖 [AI Lesson Plan] Résolution du modèle Gemini...');
-      const MODEL_NAME = await resolveGeminiModel(GEMINI_API_KEY);
-      console.log(`🤖 [AI Lesson Plan] Modèle sélectionné: ${MODEL_NAME}`);
-      
-      API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
-      requestBody = {
-        contents: [
-          { role: "user", parts: [{ text: prompt }] }
-        ]
-      };
-      
-      console.log('🔄 [AI Lesson Plan] Appel à l\'API Gemini...');
-      aiResponse = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
-    }
-
-    if (!aiResponse.ok) {
-      const errorBody = await aiResponse.json().catch(() => ({}));
-      console.error(`❌ [AI Lesson Plan] Erreur de l'API ${USE_GROQ ? 'GROQ' : 'GEMINI'}:`, JSON.stringify(errorBody, null, 2));
-      
-      // Message spécifique pour quota dépassé
-      if (aiResponse.status === 429) {
-        const provider = USE_GROQ ? 'GROQ' : 'GEMINI';
-        throw new Error(`⚠️ QUOTA API ${provider} DÉPASSÉ : Limite gratuite atteinte. Veuillez réessayer plus tard. Détails : ${errorBody.error?.message || 'Quota dépassé'}`);
+      try {
+        console.log(`🔄 [AI Lesson Plan] Appel à GROQ (clé ${i + 1})...`);
+        aiResponse = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GROQ_KEY}`
+          },
+          body: JSON.stringify(requestBody),
+        });
+        
+        if (aiResponse.ok) {
+          providerUsed = `GROQ (clé ${i + 1})`;
+          console.log(`✅ [AI Lesson Plan] Succès avec ${providerUsed}`);
+          break; // Succès, sortir de la boucle
+        } else if (aiResponse.status === 429) {
+          const errorBody = await aiResponse.json().catch(() => ({}));
+          console.warn(`⚠️ [AI Lesson Plan] Quota épuisé pour clé GROQ ${i + 1}, essai clé suivante...`);
+          lastError = new Error(`Quota GROQ clé ${i + 1} épuisé`);
+          continue; // Essayer la clé suivante
+        } else {
+          const errorBody = await aiResponse.json().catch(() => ({}));
+          console.error(`❌ [AI Lesson Plan] Erreur clé GROQ ${i + 1}:`, errorBody);
+          lastError = new Error(errorBody.error?.message || `Erreur GROQ ${aiResponse.status}`);
+          continue; // Essayer la clé suivante
+        }
+      } catch (error) {
+        console.error(`❌ [AI Lesson Plan] Exception clé GROQ ${i + 1}:`, error.message);
+        lastError = error;
+        continue; // Essayer la clé suivante
       }
-      
-      throw new Error(`[${aiResponse.status} ${aiResponse.statusText}] ${errorBody.error?.message || "Erreur inconnue de l'API."}`);
     }
     
-    console.log(`✅ [AI Lesson Plan] Réponse reçue de ${USE_GROQ ? 'GROQ' : 'GEMINI'}`);
+    // Si aucune clé GROQ n'a fonctionné, essayer GEMINI
+    if (!providerUsed && GEMINI_API_KEY) {
+      console.log('🤖 [AI Lesson Plan] Toutes les clés GROQ épuisées, fallback vers GEMINI...');
+      try {
+        const MODEL_NAME = await resolveGeminiModel(GEMINI_API_KEY);
+        console.log(`🤖 [AI Lesson Plan] Modèle GEMINI sélectionné: ${MODEL_NAME}`);
+        
+        API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+        requestBody = {
+          contents: [{ role: "user", parts: [{ text: prompt }] }]
+        };
+        
+        console.log('🔄 [AI Lesson Plan] Appel à l\'API Gemini...');
+        aiResponse = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+        
+        if (aiResponse.ok) {
+          providerUsed = 'GEMINI';
+          console.log('✅ [AI Lesson Plan] Succès avec GEMINI');
+        } else {
+          const errorBody = await aiResponse.json().catch(() => ({}));
+          console.error('❌ [AI Lesson Plan] Erreur GEMINI:', errorBody);
+          throw new Error(`Erreur GEMINI: ${errorBody.error?.message || aiResponse.statusText}`);
+        }
+      } catch (error) {
+        console.error('❌ [AI Lesson Plan] Exception GEMINI:', error.message);
+        lastError = error;
+      }
+    }
+    
+    // Si aucune API n'a fonctionné
+    if (!providerUsed) {
+      console.error('❌ [AI Lesson Plan] TOUTES LES APIS ÉPUISÉES');
+      throw new Error(`⚠️ QUOTA API ÉPUISÉ : Toutes les clés API (GROQ et GEMINI) ont atteint leur limite. Veuillez réessayer demain. ${lastError?.message || ''}`);
+    }
 
     const aiResult = await aiResponse.json();
 
     // Extraction robuste du texte JSON renvoyé
     let text = "";
     try {
-      if (USE_GROQ) {
+      if (providerUsed.includes('GROQ')) {
         // Format GROQ (OpenAI-compatible)
         text = aiResult?.choices?.[0]?.message?.content?.trim();
       } else {
